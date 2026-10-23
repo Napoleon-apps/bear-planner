@@ -135,6 +135,9 @@ button{cursor:pointer}
 .dot.t1{background:var(--t1)} .dot.t2{background:var(--t2)} .dot.t0{background:var(--city)}
 .rowbtns{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
 .notice{background:var(--t1-soft); color:var(--t1-ink); border-radius:8px; padding:8px 10px; font-size:12.5px; margin-bottom:12px; display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap}
+.tpl{border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:12px; background:var(--surface2)}
+.tpl summary{cursor:pointer; font-weight:600; font-size:13.5px}
+.tplrow{display:grid; grid-template-columns:90px auto; gap:8px; align-items:center; justify-content:start}
 .group-h{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:12px 0 4px; display:flex; justify-content:space-between}
 .mlist{display:flex; flex-direction:column}
 .mrow{display:grid; grid-template-columns:18px minmax(0,1fr) auto auto; align-items:center; gap:8px; border:0; background:transparent; text-align:left; padding:6px 6px; border-radius:7px; font-size:13.5px}
@@ -280,7 +283,7 @@ code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12.5
       <div class="field"><label class="label" for="addSplit">Trap assignment</label>
         <select class="inp" id="addSplit"><option value="even">Split evenly by power</option><option value="1">All to Trap 1</option><option value="2">All to Trap 2</option><option value="0">Nearest trap, no group</option></select></div>
       <div class="field"><label class="label" for="addMode">Existing cities</label>
-        <select class="inp" id="addMode"><option value="add">Keep and add these</option><option value="replace">Replace all cities</option></select></div>
+        <select class="inp" id="addMode"><option value="add">Keep them, fill open spots first</option><option value="refill">Empty all spots, then refill</option><option value="replace">Remove all cities and spots</option></select></div>
     </div>
     <label class="check"><input type="checkbox" id="addStrong" checked> Rally leaders and strongest players closest to the trap</label>
     <p class="small muted" id="addMsg" style="min-height:18px;margin:0 0 6px"></p>
@@ -303,7 +306,7 @@ const ORDER = ['block', 'banner', 'hq', 'trap1', 'trap2', 'city'];
 const LS_KEY = 'bear-trap-planner:standalone:v1';
 const HINTS = {
   select: '<b>Drag</b> a city to move it · drag empty space to pan · scroll or pinch to zoom',
-  city: '<b>Click a tile</b> to place a 2×2 city',
+  city: '<b>Click a tile</b> to place an open city spot (2×2). Tap it to add a player',
   trap1: '<b>Click</b> to place Bear Trap 1 (3×3). Placing again moves it',
   trap2: '<b>Click</b> to place Bear Trap 2 (3×3). Placing again moves it',
   hq: '<b>Click</b> to place the Alliance HQ (3×3)',
@@ -382,6 +385,7 @@ function normalize(raw) {
       n.leader = !!o.leader;
       n.note = typeof o.note === 'string' ? o.note.slice(0, 80) : '';
       if (o.example) n.example = true;
+      if (o.open && !n.name) { n.open = true; n.power = 0; n.leader = false; }
     }
     if (o.type === 'trap1' || o.type === 'trap2') n.label = typeof o.label === 'string' && o.label.trim() ? o.label.slice(0, 30) : NAMES[o.type];
     out.objects.push(n);
@@ -399,7 +403,8 @@ let plan = (() => { const l = loadLocal(); return l && l.base === officialId && 
 let modified = (() => { const l = loadLocal(); return !!(l && l.base === officialId && l.modified); })();
 let sel = null, tool = 'select', readOnly = false, tab = 'mem';
 let view = { s: 20, ox: 0, oy: 0 };
-let ghost = null, preview = null, onboardDismissed = false, memberQuery = '';
+let memberQuery = '';
+let ghost = null, preview = null, onboardDismissed = false, tplOpen = false, tplCount = 20;
 const undoStack = [], redoStack = [];
 
 function mutate(fn) {
@@ -506,6 +511,7 @@ function autoPlace(P, members, gap) {
     for (let yy = best.y; yy < best.y + 2; yy++) for (let xx = best.x; xx < best.x + 2; xx++) g[yy * w + xx] = 1;
     const c = { id: m.id || uid(), type: 'city', x: best.x, y: best.y, name: m.name || '', power: m.power || 0, trap: m.trap || 0, leader: !!m.leader, note: m.note || '' };
     if (m.example) c.example = true;
+    if (m.open) { c.open = true; c.name = ''; }
     P.objects.push(c); placed.push(c);
   }
   return { placed, failed };
@@ -536,10 +542,12 @@ function parseMembers(text) {
   }
   return out;
 }
-function placeMembers(members, split, strongest, replace) {
+function emptySpot(c) { c.open = true; c.name = ''; c.power = 0; c.leader = false; c.note = ''; delete c.example; }
+function placeMembers(members, split, strongest, mode) {
   let result = null;
   mutate((P) => {
-    if (replace) P.objects = P.objects.filter((o) => o.type !== 'city');
+    if (mode === true || mode === 'replace') P.objects = P.objects.filter((o) => o.type !== 'city');
+    if (mode === 'refill') P.objects.forEach((o) => { if (o.type === 'city') emptySpot(o); });
     let list = strongest ? sortMembers(members) : members.slice();
     assignTraps(list, split);
     if (split === '0') for (const m of list) { m.target = 0; }
@@ -548,9 +556,47 @@ function placeMembers(members, split, strongest, replace) {
       let c1 = 0, c2 = 0;
       for (const m of list) { if (trapObj(1, P) && (!trapObj(2, P) || c1 <= c2)) { m.target = 1; c1++; } else if (trapObj(2, P)) { m.target = 2; c2++; } }
     }
-    result = autoPlace(P, list, P.settings.gap);
+    const spots = P.objects.filter((o) => o.type === 'city' && o.open);
+    const spotDist = (sp) => { const t = sp.trap ? trapObj(sp.trap, P) : nearestTrap(sp, P); return t ? dist(sp, t) : 0; };
+    const rest = []; let filled = 0;
+    for (const m of list) {
+      if (!spots.length) { rest.push(m); continue; }
+      let pool = m.target ? spots.filter((sp) => sp.trap === m.target) : spots;
+      if (!pool.length) pool = spots;
+      let best = pool[0], bd = spotDist(best);
+      for (const sp of pool) { const d = spotDist(sp); if (d < bd) { bd = d; best = sp; } }
+      spots.splice(spots.indexOf(best), 1);
+      delete best.open;
+      Object.assign(best, { name: m.name || '', power: m.power || 0, leader: !!m.leader, note: m.note || '' });
+      if (m.example) best.example = true;
+      if (!best.trap) best.trap = m.trap || 0;
+      filled++;
+    }
+    result = autoPlace(P, rest, P.settings.gap);
+    result.filled = filled;
   });
   return result;
+}
+function addOpenSpots(n) {
+  if (!trapObj(1) && !trapObj(2)) { toast('Place at least one bear trap first.'); return; }
+  let res = null;
+  mutate((P) => {
+    const list = []; for (let i = 0; i < n; i++) list.push({ open: true, trap: 0, power: 0 });
+    const has1 = !!trapObj(1, P), has2 = !!trapObj(2, P);
+    assignTraps(list, has1 && has2 ? 'even' : has1 ? '1' : '2');
+    res = autoPlace(P, list, P.settings.gap);
+  });
+  toast(res && res.failed.length ? `${res.placed.length} open spots added, ${res.failed.length} didn't fit. Make the map bigger.` : `${res ? res.placed.length : 0} open spots added.`);
+}
+function spotRanks(P) {
+  const ranks = {};
+  for (const n of [1, 2, 0]) {
+    const list = P.objects.filter((o) => o.type === 'city' && o.open && (o.trap || 0) === n)
+      .map((o) => { const t = o.trap ? trapObj(o.trap, P) : nearestTrap(o, P); return { o, d: t ? dist(o, t) : 0 }; })
+      .sort((a, b) => a.d - b.d);
+    list.forEach((r, i) => { ranks[r.o.id] = i + 1; });
+  }
+  return ranks;
 }
 function repack() {
   const cities = plan.objects.filter((o) => o.type === 'city');
@@ -689,6 +735,7 @@ function drawScene(ctx, o) {
   }
 
   // objects
+  o.spotRank = spotRanks(P);
   for (const type of ORDER) {
     for (const ob of P.objects) {
       if (ob.type !== type) continue;
@@ -766,6 +813,20 @@ function drawObject(ctx, ob, x, y, o, X, Y, cov, pv) {
     const [main, soft, ink] = trapColors(ob.trap, C);
     const pad = Math.max(1, s * 0.07);
     const bx = px + pad, by = py + pad, bw = w - 2 * pad;
+    if (ob.open) {
+      const base = (pv && !pv.valid) ? 0.5 : 1;
+      rr(ctx, bx, by, bw, bw, Math.max(2, s * 0.22));
+      ctx.save(); ctx.globalAlpha = 0.14 * base; ctx.fillStyle = main; ctx.fill();
+      ctx.globalAlpha = 0.8 * base; ctx.strokeStyle = main; ctx.lineWidth = Math.max(1, s * 0.07);
+      ctx.setLineDash([Math.max(3, s * 0.24), Math.max(2, s * 0.16)]); ctx.stroke(); ctx.restore();
+      const rk = o.spotRank && o.spotRank[ob.id];
+      if (rk && s >= 9) {
+        const fs = ex ? s * 0.48 : clamp(s * 0.5, 9, 15);
+        ctx.save(); ctx.globalAlpha = 0.85 * base; ctx.font = `600 ${fs}px ${FONT_HEAD}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = main; ctx.fillText(String(rk), px + w / 2, py + w / 2); ctx.restore();
+      }
+      ctx.globalAlpha = 1; return;
+    }
     rr(ctx, bx, by, bw, bw, Math.max(2, s * 0.22)); ctx.fillStyle = soft; ctx.fill();
     const outside = cov && !insideCov(P, cov, x, y, 2);
     ctx.lineWidth = Math.max(1.2, s * 0.09); ctx.strokeStyle = outside ? C.danger : main;
@@ -850,8 +911,7 @@ function placeAt(f) {
   if (existing) { mutate(() => { existing.x = t.x; existing.y = t.y; }); sel = existing.id; refreshUI(); return; }
   const o = { id: uid(), type: tool, x: t.x, y: t.y };
   if (tool === 'city') {
-    const n = plan.objects.filter((q) => q.type === 'city').length + 1;
-    Object.assign(o, { name: 'City ' + n, power: 0, trap: 0, leader: false, note: '' });
+    Object.assign(o, { name: '', power: 0, trap: 0, leader: false, note: '', open: true });
     const nt = nearestTrap(o); if (nt) o.trap = nt.type === 'trap1' ? 1 : 2;
   }
   if (tool === 'trap1' || tool === 'trap2') o.label = NAMES[tool];
@@ -999,7 +1059,8 @@ function trapLabel(n) { const t = trapObj(n); return t ? (t.label || NAMES['trap
 function refreshUI() {
   $('#planTitle').textContent = plan.name || 'Bear Trap Planner';
   const cities = plan.objects.filter((o) => o.type === 'city');
-  $('#planSub').textContent = `${cities.length} ${cities.length === 1 ? 'city' : 'cities'} · ${plan.grid.w}×${plan.grid.h} tiles`;
+  const nOpen = cities.filter((c) => c.open).length, nPl = cities.length - nOpen;
+  $('#planSub').textContent = `${nPl} ${nPl === 1 ? 'player' : 'players'}${nOpen ? ` · ${nOpen} open ${nOpen === 1 ? 'spot' : 'spots'}` : ''} · ${plan.grid.w}×${plan.grid.h} tiles`;
   $('#btnUndo').disabled = readOnly || !undoStack.length;
   $('#btnRedo').disabled = readOnly || !redoStack.length;
   $('#onboard').hidden = readOnly || onboardDismissed || cities.length > 0;
@@ -1015,15 +1076,16 @@ function renderSel() {
     return;
   }
   const dis = readOnly ? 'disabled' : '';
-  let h = `<h3>${ob.type === 'city' ? `<span class="dot t${ob.trap}"></span>` : ''}${esc(ob.type === 'city' ? (ob.name || 'City') : (ob.label || NAMES[ob.type]))}</h3>`;
+  let h = `<h3>${ob.type === 'city' ? `<span class="dot t${ob.trap}"></span>` : ''}${esc(ob.type === 'city' ? (ob.open ? 'Open spot' : (ob.name || 'City')) : (ob.label || NAMES[ob.type]))}</h3>`;
   const pos = `<b>${coordStr(ob)}</b> <span class="muted">(top-left tile, ${sz(ob)}×${sz(ob)})</span>`;
   if (ob.type === 'city') {
     const t = cityTrap(ob);
     const d = t ? dist(ob, t).toFixed(1) : null;
     let terr = '';
     if (plan.settings.territory) { const cov = coverage(plan); terr = insideCov(plan, cov, ob.x, ob.y, 2) ? '<br><span class="muted">Inside alliance territory</span>' : '<br><span class="warn">Outside alliance territory</span>'; }
-    h += `<div class="readout">${pos}${t ? `<br>${d} tiles from ${esc(t.label || NAMES[t.type])}` : ''}${terr}</div>`;
-    h += `<div class="field"><label class="label" for="fName">Player name</label><input class="inp" id="fName" maxlength="40" value="${esc(ob.name)}" ${dis}></div>`;
+    const rk = ob.open ? spotRanks(plan)[ob.id] : 0;
+    h += `<div class="readout">${pos}${t ? `<br>${d} tiles from ${esc(t.label || NAMES[t.type])}` : ''}${rk ? `<br>Spot ${rk} in this group, by distance` : ''}${terr}</div>`;
+    h += `<div class="field"><label class="label" for="fName">Player name</label><input class="inp" id="fName" maxlength="40" value="${esc(ob.name)}" ${ob.open ? 'placeholder="Type a name to fill this spot"' : ''} ${dis}></div>`;
     h += `<div class="field"><label class="label" for="fPower">Power</label><input class="inp" id="fPower" placeholder="e.g. 37M" value="${esc(fmtPower(ob.power))}" ${dis}></div>`;
     h += `<div class="field"><span class="label">Bear trap group</span><div class="seg" id="fTrap">
       <button data-v="1" aria-pressed="${ob.trap === 1}" ${dis}>Trap 1</button><button data-v="2" aria-pressed="${ob.trap === 2}" ${dis}>Trap 2</button><button data-v="0" aria-pressed="${ob.trap === 0}" ${dis}>None</button></div></div>`;
@@ -1037,10 +1099,12 @@ function renderSel() {
   } else {
     h += `<div class="readout">${pos}</div>`;
   }
-  if (!readOnly) h += `<button class="btn danger block" id="fDelete">Remove ${esc(NAMES[ob.type].toLowerCase())}</button>`;
+  if (!readOnly && ob.type === 'city' && !ob.open) h += `<button class="btn block" id="fClear" style="margin-bottom:8px">Move player out, keep spot open</button>`;
+  if (!readOnly) h += `<button class="btn danger block" id="fDelete">Remove ${ob.type === 'city' ? (ob.open ? 'spot' : 'city') : esc(NAMES[ob.type].toLowerCase())}</button>`;
   pane.innerHTML = h;
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
-  on('fName', 'change', (e) => mutate(() => { ob.name = e.target.value.trim().slice(0, 40); }));
+  on('fName', 'change', (e) => mutate(() => { ob.name = e.target.value.trim().slice(0, 40); if (ob.name) delete ob.open; }));
+  on('fClear', 'click', () => mutate(() => { emptySpot(ob); }));
   on('fPower', 'change', (e) => { const v = e.target.value.trim(); const pw = v ? parsePower(v) : 0; if (pw === null) { toast('Write power like 37M, 850K or 37000000.'); e.target.value = fmtPower(ob.power); return; } mutate(() => { ob.power = pw; }); });
   on('fLeader', 'change', (e) => mutate(() => { ob.leader = e.target.checked; }));
   on('fNote', 'change', (e) => mutate(() => { ob.note = e.target.value.trim().slice(0, 80); }));
@@ -1058,19 +1122,29 @@ function sortedCities() {
 }
 function renderMembers() {
   const pane = $('#pane-mem');
-  const rows = sortedCities();
+  const allRows = sortedCities();
+  const rows = allRows.filter((r) => !r.c.open);
+  const openN = (n) => allRows.filter((r) => r.c.open && (r.c.trap || 0) === n).length;
+  const totalOpen = allRows.length - rows.length;
   const g1 = rows.filter((r) => r.c.trap === 1), g2 = rows.filter((r) => r.c.trap === 2), g0 = rows.filter((r) => !r.c.trap);
   const sumP = (g) => g.reduce((a, r) => a + (r.c.power || 0), 0);
   const avgD = (g) => g.length ? (g.reduce((a, r) => a + (Number.isFinite(r.d) ? r.d : 0), 0) / g.length).toFixed(1) : '–';
   const hasEx = rows.some((r) => r.c.example);
   let h = `<div class="summary">
-    <div class="sum t1"><div class="k"><span class="dot t1"></span>${esc(trapLabel(1))}</div><div class="v">${g1.length} cities${sumP(g1) ? ' · ' + fmtPower(sumP(g1)) : ''}<br>avg ${avgD(g1)} tiles away</div></div>
-    <div class="sum t2"><div class="k"><span class="dot t2"></span>${esc(trapLabel(2))}</div><div class="v">${g2.length} cities${sumP(g2) ? ' · ' + fmtPower(sumP(g2)) : ''}<br>avg ${avgD(g2)} tiles away</div></div>
+    <div class="sum t1"><div class="k"><span class="dot t1"></span>${esc(trapLabel(1))}</div><div class="v">${g1.length} players${sumP(g1) ? ' · ' + fmtPower(sumP(g1)) : ''}<br>${openN(1) ? openN(1) + ' open · ' : ''}avg ${avgD(g1)} tiles</div></div>
+    <div class="sum t2"><div class="k"><span class="dot t2"></span>${esc(trapLabel(2))}</div><div class="v">${g2.length} players${sumP(g2) ? ' · ' + fmtPower(sumP(g2)) : ''}<br>${openN(2) ? openN(2) + ' open · ' : ''}avg ${avgD(g2)} tiles</div></div>
   </div>`;
+  if (!readOnly) h += `<details class="tpl" id="tplBox" ${tplOpen ? 'open' : ''}><summary>Template · open spots${totalOpen ? ` (${totalOpen})` : ''}</summary>
+    <p class="small muted" style="margin:6px 0 8px">Open spots are see-through places around the traps, numbered from closest to farthest. New members fill the closest open spot in their group first.</p>
+    <div class="tplrow"><input class="inp" id="tCount" type="number" min="1" max="200" value="${tplCount}" aria-label="Number of open spots"><button class="btn small" id="tAdd">Add open spots</button></div>
+    <div class="rowbtns" style="margin:8px 0 0"><button class="btn small" id="tEmpty">Empty all spots</button>${totalOpen ? '<button class="btn small danger" id="tRemove">Remove open spots</button>' : ''}</div>
+  </details>`;
   if (hasEx && !readOnly) h += `<div class="notice"><span>These are example cities, not your members.</span><button class="btn small" id="mRemoveEx">Remove examples</button></div>`;
   if (rows.length > 8) h += `<div class="field"><input class="inp" id="mSearch" type="search" placeholder="Find a player…" value="${esc(memberQuery)}" aria-label="Find a player"></div>`;
   h += `<div class="rowbtns">${readOnly ? '' : '<button class="btn small primary" id="mAdd">Add members</button><button class="btn small" id="mRepack" title="Move every city as close to its trap as possible, strongest first">Re-pack</button>'}<button class="btn small" id="mCopy">Copy list</button></div>`;
-  if (!rows.length) {
+  if (!rows.length && totalOpen) {
+    h += `<div class="empty"><div>No players yet. Use <b>Add members</b> and they fill the ${totalOpen} open spots, closest first. Or tap a spot on the map and type a name.</div></div>`;
+  } else if (!rows.length) {
     h += `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg><div>No cities yet. Use <b>Add members</b> to paste your alliance list, or pick the City tool and click the map.</div></div>`;
   } else {
     const cov = plan.settings.territory ? coverage(plan) : null;
@@ -1096,6 +1170,13 @@ function renderMembers() {
   pane.querySelectorAll('.mrow').forEach((b) => b.addEventListener('click', () => { const o = byId(b.dataset.id); if (!o) return; sel = o.id; centerOn(o); refreshUI(); }));
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('mAdd', openAdd); on('mRepack', repack); on('mCopy', copyList);
+  const box = document.getElementById('tplBox'); if (box) box.addEventListener('toggle', () => { tplOpen = box.open; });
+  const tc = document.getElementById('tCount'); if (tc) tc.addEventListener('change', () => { tplCount = clamp(int(tc.value, 20), 1, 200); });
+  on('tAdd', () => { tplCount = clamp(int(document.getElementById('tCount').value, 20), 1, 200); addOpenSpots(tplCount); });
+  const te = document.getElementById('tEmpty');
+  if (te) armConfirm(te, 'Empty all spots', () => { mutate((P) => P.objects.forEach((o) => { if (o.type === 'city') emptySpot(o); })); toast('All players moved out. The spots stay as an empty template. Undo to go back.'); });
+  const tr = document.getElementById('tRemove');
+  if (tr) armConfirm(tr, 'Remove open spots', () => { mutate((P) => { P.objects = P.objects.filter((o) => !(o.type === 'city' && o.open)); }); fixSel(); refreshUI(); });
   on('mRemoveEx', () => { mutate((P) => { P.objects = P.objects.filter((o) => !(o.type === 'city' && o.example)); }); sel = null; refreshUI(); });
 }
 
@@ -1149,20 +1230,21 @@ $('#addGo').onclick = () => {
   const members = parseMembers($('#addText').value);
   if (!members.length) { $('#addMsg').textContent = 'Paste at least one name, one per line.'; return; }
   if (!trapObj(1) && !trapObj(2)) { $('#addMsg').textContent = 'Place at least one bear trap on the map first.'; return; }
-  const res = placeMembers(members, $('#addSplit').value, $('#addStrong').checked, $('#addMode').value === 'replace');
+  const res = placeMembers(members, $('#addSplit').value, $('#addStrong').checked, $('#addMode').value);
   closeAdd(); $('#addText').value = ''; setTab('mem');
-  toast(res && res.failed.length ? `${res.placed.length} placed, ${res.failed.length} didn't fit. Make the map bigger.` : `${res ? res.placed.length : 0} cities placed.`);
+  const fl = res ? res.filled || 0 : 0, pl = res ? res.placed.length : 0;
+  toast(res && res.failed.length ? `${fl + pl} placed, ${res.failed.length} didn't fit. Make the map bigger.` : fl && pl ? `${fl} open spots filled, ${pl} new cities added.` : fl ? `${fl} open spots filled.` : `${pl} cities placed.`);
 };
 $('#onboardAdd').onclick = openAdd;
 $('#onboardClose').onclick = () => { onboardDismissed = true; refreshUI(); };
 $('#onboardExample').onclick = () => {
   if (!trapObj(1) && !trapObj(2)) { toast('Place a bear trap first.'); return; }
-  placeMembers(exampleMembers(), 'even', true, false); setTab('mem'); toast('Example alliance placed. Remove it from the Members tab when you add your own.');
+  placeMembers(exampleMembers(), 'even', true, 'add'); setTab('mem'); toast('Example alliance placed. Remove it from the Members tab when you add your own.');
 };
 
 /* ---------- copy list ---------- */
 function listText() {
-  const rows = sortedCities();
+  const rows = sortedCities().filter((r) => !r.c.open);
   const lines = [`${plan.name}`];
   for (const n of [1, 2, 0]) {
     const g = rows.filter((r) => (r.c.trap || 0) === n); if (!g.length) continue;
@@ -1303,10 +1385,10 @@ function pageHeader(g, title, sub) {
 }
 function renderMapPage() {
   const [c, g] = pageCanvas();
-  const rows = sortedCities();
+  const all = sortedCities(); const rows = all.filter((r) => !r.c.open); const nOpen = all.length - rows.length;
   const n1 = rows.filter((r) => r.c.trap === 1).length, n2 = rows.filter((r) => r.c.trap === 2).length;
   const date = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-  pageHeader(g, plan.name, `${date} · ${rows.length} cities · ${trapLabel(1)}: ${n1} · ${trapLabel(2)}: ${n2}`);
+  pageHeader(g, plan.name, `${date} · ${rows.length} players · ${trapLabel(1)}: ${n1} · ${trapLabel(2)}: ${n2}${nOpen ? ` · ${nOpen} open spots` : ''}`);
   const ax = 150, ay = 270, aw = PW - 240, ah = PH - 270 - 190;
   const b = contentBox(plan, 2);
   const s = Math.min(aw / b.w, ah / b.h);
@@ -1331,6 +1413,7 @@ function renderMapPage() {
   item(sq(PRINT.t1, null), trapLabel(1)); item(sq(PRINT.t2, null), trapLabel(2));
   item(sq(PRINT.t1Soft, PRINT.t1), 'City, Trap 1 group'); item(sq(PRINT.t2Soft, PRINT.t2), 'City, Trap 2 group');
   item((x, y) => { g.fillStyle = PRINT.focus; star(g, x + 20, y, 22); }, 'Rally leader');
+  if (nOpen) item((x, y) => { rr(g, x, y - 20, 40, 40, 8); g.save(); g.globalAlpha = 0.14; g.fillStyle = PRINT.t1; g.fill(); g.globalAlpha = 0.8; g.strokeStyle = PRINT.t1; g.lineWidth = 4; g.setLineDash([9, 6]); g.stroke(); g.restore(); }, 'Open spot');
   item(sq(PRINT.hq, PRINT.hqInk), 'Alliance HQ');
   if (plan.settings.rings) item((x, y) => { g.strokeStyle = PRINT.muted; g.lineWidth = 4; g.setLineDash([10, 7]); g.beginPath(); g.arc(x + 20, y, 18, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }, `Ring every ${plan.settings.ringStep} tiles`);
   g.fillStyle = '#8E97AE'; g.font = `500 26px ${FONT_UI}`; g.textAlign = 'right';
@@ -1338,7 +1421,7 @@ function renderMapPage() {
   return c;
 }
 function renderTablePages() {
-  const rows = sortedCities(); if (!rows.length) return [];
+  const rows = sortedCities().filter((r) => !r.c.open); if (!rows.length) return [];
   const per = 22, pages = [];
   const cols = [{ x: 90, t: '#' }, { x: 180, t: 'Player' }, { x: 1180, t: 'Group' }, { x: 1560, t: 'Role' }, { x: 1890, t: 'Power', r: true, rx: 2120 }, { x: 2200, t: 'X : Y' }, { x: 2560, t: 'Tiles to trap', r: true, rx: 2880 }];
   const total = Math.ceil(rows.length / per);

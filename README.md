@@ -21,6 +21,15 @@ Share that link in alliance chat or Discord.
 
 Everyone sees the new plan within a few minutes. You never need to touch `index.html` again.
 
+## Template with open spots
+
+Open spots are see-through city places around the traps, numbered from closest to farthest.
+
+- **Members tab → Template → Add open spots** reserves empty places around the traps.
+- **Empty all spots** moves every player out but keeps the layout as an empty template.
+- **Add members** fills the closest open spot in each group first, strongest players first.
+- Tap any spot on the map and type a name to fill it by hand.
+
 ## Good to know
 
 - Changes other people make stay on their own device. They never change the official plan.
