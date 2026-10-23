@@ -138,6 +138,18 @@ button{cursor:pointer}
 .tpl{border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:12px; background:var(--surface2)}
 .tpl summary{cursor:pointer; font-weight:600; font-size:13.5px}
 .tplrow{display:grid; grid-template-columns:90px auto; gap:8px; align-items:center; justify-content:start}
+.rrow{display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:4px; border-radius:7px}
+.rrow.on{background:var(--surface2); box-shadow:inset 0 0 0 1.5px var(--accent)}
+.rmain{display:grid; grid-template-columns:18px minmax(0,1fr) auto; align-items:center; gap:8px; border:0; background:transparent; text-align:left; padding:6px 6px; border-radius:7px; font-size:13.5px; min-width:0}
+.rmain:hover{background:var(--surface2)}
+.rmain .n{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600}
+.rmain .p{color:var(--muted); font-size:12.5px}
+.rx{border:0; background:transparent; color:var(--muted); width:28px; height:28px; border-radius:6px; font-size:16px}
+.rx:hover{background:var(--surface2); color:var(--danger)}
+.linkbtn{border:0; background:transparent; color:var(--accent); font-weight:700; font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; padding:0}
+.group-h.unplaced{align-items:center}
+.assignbar{position:absolute; left:50%; top:10px; transform:translateX(-50%); display:flex; align-items:center; gap:10px; background:var(--primary); color:var(--on-primary); border-radius:10px; padding:7px 8px 7px 12px; font-size:13px; max-width:calc(100% - 20px); box-shadow:0 6px 20px rgba(10,15,30,.25)}
+.assignbar .btn{background:transparent; color:inherit; border-color:currentColor}
 .group-h{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:12px 0 4px; display:flex; justify-content:space-between}
 .mlist{display:flex; flex-direction:column}
 .mrow{display:grid; grid-template-columns:18px minmax(0,1fr) auto auto; align-items:center; gap:8px; border:0; background:transparent; text-align:left; padding:6px 6px; border-radius:7px; font-size:13.5px}
@@ -214,6 +226,7 @@ code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12.5
           <button class="btn" id="onboardExample">Show example</button>
         </div>
       </div>
+      <div class="assignbar" id="assignBar" hidden><span id="assignText"></span><button class="btn small" id="assignCancel">Cancel</button></div>
       <div class="hint" id="hint"></div>
       <div class="zoom">
         <button id="zoomOut" aria-label="Zoom out">−</button>
@@ -286,6 +299,7 @@ code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12.5
         <select class="inp" id="addMode"><option value="add">Keep them, fill open spots first</option><option value="refill">Empty all spots, then refill</option><option value="replace">Remove all cities and spots</option></select></div>
     </div>
     <label class="check"><input type="checkbox" id="addStrong" checked> Rally leaders and strongest players closest to the trap</label>
+    <label class="check"><input type="checkbox" id="addListOnly"> Only add them to the member list. I'll assign spots myself</label>
     <p class="small muted" id="addMsg" style="min-height:18px;margin:0 0 6px"></p>
     <div class="foot">
       <button class="btn" id="addCancel">Cancel</button>
@@ -357,6 +371,7 @@ function normalize(raw) {
     grid: { w: clamp(int(g.w, d.grid.w), 12, 150), h: clamp(int(g.h, d.grid.h), 12, 150), ox: int(g.ox, 0), oy: int(g.oy, 0) },
     settings: Object.assign({}, d.settings),
     objects: [],
+    roster: [],
     rev: typeof p.rev === 'string' ? p.rev : undefined,
     updatedAt: Number.isFinite(p.updatedAt) ? p.updatedAt : undefined
   };
@@ -390,6 +405,13 @@ function normalize(raw) {
     if (o.type === 'trap1' || o.type === 'trap2') n.label = typeof o.label === 'string' && o.label.trim() ? o.label.slice(0, 30) : NAMES[o.type];
     out.objects.push(n);
   }
+  const rseen = {};
+  for (const r of Array.isArray(p.roster) ? p.roster : []) {
+    if (!r || typeof r.name !== 'string' || !r.name.trim()) continue;
+    let id = typeof r.id === 'string' && r.id ? r.id.slice(0, 24) : uid(); if (rseen[id]) id = uid(); rseen[id] = true;
+    out.roster.push({ id, name: r.name.slice(0, 40), power: Number.isFinite(r.power) && r.power > 0 ? Math.round(r.power) : 0,
+      leader: !!r.leader, note: typeof r.note === 'string' ? r.note.slice(0, 80) : '', trap: r.trap === 1 || r.trap === 2 ? r.trap : 0 });
+  }
   return out;
 }
 function loadLocal() { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -403,8 +425,7 @@ let plan = (() => { const l = loadLocal(); return l && l.base === officialId && 
 let modified = (() => { const l = loadLocal(); return !!(l && l.base === officialId && l.modified); })();
 let sel = null, tool = 'select', readOnly = false, tab = 'mem';
 let view = { s: 20, ox: 0, oy: 0 };
-let memberQuery = '';
-let ghost = null, preview = null, onboardDismissed = false, tplOpen = false, tplCount = 20;
+let ghost = null, preview = null, onboardDismissed = false, tplOpen = false, tplCount = 20, assignId = null, memberQuery = '';
 const undoStack = [], redoStack = [];
 
 function mutate(fn) {
@@ -516,9 +537,19 @@ function autoPlace(P, members, gap) {
   }
   return { placed, failed };
 }
-function assignTraps(sorted, split) {
+function assignTraps(sorted, split, P = plan) {
   const pattern = [1, 2, 2, 1];
   let i = 0;
+  if (split === 'balance') {
+    let c1 = P.objects.filter((o) => o.type === 'city' && !o.open && o.trap === 1).length;
+    let c2 = P.objects.filter((o) => o.type === 'city' && !o.open && o.trap === 2).length;
+    const h1 = !!trapObj(1, P), h2 = !!trapObj(2, P);
+    for (const m of sorted) {
+      if (m.trap === 1 || m.trap === 2) { m.target = m.trap; continue; }
+      const t = h1 && (!h2 || c1 <= c2) ? 1 : 2; m.trap = t; m.target = t; t === 1 ? c1++ : c2++;
+    }
+    return;
+  }
   for (const m of sorted) {
     if (m.trap === 1 || m.trap === 2) { m.target = m.trap; continue; }
     if (split === '1' || split === '2') { m.trap = +split; m.target = m.trap; continue; }
@@ -542,14 +573,24 @@ function parseMembers(text) {
   }
   return out;
 }
-function emptySpot(c) { c.open = true; c.name = ''; c.power = 0; c.leader = false; c.note = ''; delete c.example; }
+function toRoster(c) { return { id: uid(), name: c.name, power: c.power || 0, leader: !!c.leader, note: c.note || '', trap: c.trap || 0 }; }
+function emptySpot(c, P) {
+  if (P && c.name && !c.open && !c.example) P.roster.push(toRoster(c));
+  c.open = true; c.name = ''; c.power = 0; c.leader = false; c.note = ''; delete c.example;
+}
 function placeMembers(members, split, strongest, mode) {
   let result = null;
-  mutate((P) => {
+  mutate((P) => { result = fillAndPlace(P, members, split, strongest, mode); });
+  return result;
+}
+function fillAndPlace(P, members, split, strongest, mode) {
+    let result = null;
+    const names = new Set(members.map((m) => (m.name || '').toLowerCase()).filter(Boolean));
+    P.roster = P.roster.filter((r) => !names.has(r.name.toLowerCase()));
     if (mode === true || mode === 'replace') P.objects = P.objects.filter((o) => o.type !== 'city');
     if (mode === 'refill') P.objects.forEach((o) => { if (o.type === 'city') emptySpot(o); });
     let list = strongest ? sortMembers(members) : members.slice();
-    assignTraps(list, split);
+    assignTraps(list, split, P);
     if (split === '0') for (const m of list) { m.target = 0; }
     if (split === '0') {
       // nearest trap: target whichever trap has fewer cities so far, keep group empty
@@ -574,8 +615,7 @@ function placeMembers(members, split, strongest, mode) {
     }
     result = autoPlace(P, rest, P.settings.gap);
     result.filled = filled;
-  });
-  return result;
+    return result;
 }
 function addOpenSpots(n) {
   if (!trapObj(1) && !trapObj(2)) { toast('Place at least one bear trap first.'); return; }
@@ -587,6 +627,59 @@ function addOpenSpots(n) {
     res = autoPlace(P, list, P.settings.gap);
   });
   toast(res && res.failed.length ? `${res.placed.length} open spots added, ${res.failed.length} didn't fit. Make the map bigger.` : `${res ? res.placed.length : 0} open spots added.`);
+}
+function rosterById(id) { return plan.roster.find((r) => r.id === id) || null; }
+function updateAssignBar() {
+  const r = assignId ? rosterById(assignId) : null;
+  if (!r) assignId = null;
+  $('#assignBar').hidden = !r;
+  if (r) $('#assignText').innerHTML = `Placing <b>${esc(r.name)}</b>: tap a see-through spot or an empty tile`;
+  $('#hint').hidden = !!r;
+}
+function startAssign(id) {
+  if (readOnly) return;
+  if (assignId === id) { cancelAssign(); return; }
+  setTool('select'); assignId = id; updateAssignBar(); refreshUI(); requestRender();
+}
+function cancelAssign() { assignId = null; ghost = null; updateAssignBar(); refreshUI(); requestRender(); }
+function assignGhost(f) {
+  const hit = hitTest(Math.floor(f.x), Math.floor(f.y));
+  if (hit && hit.type === 'city' && hit.open) return { x: hit.x, y: hit.y, size: 2, valid: true };
+  if (hit) return { x: hit.x, y: hit.y, size: sz(hit), valid: false };
+  const t = placeTarget('city', f); return { x: t.x, y: t.y, size: 2, valid: validAt('city', t.x, t.y, null) };
+}
+function assignAt(f) {
+  const r = rosterById(assignId); if (!r) { cancelAssign(); return; }
+  const hit = hitTest(Math.floor(f.x), Math.floor(f.y));
+  let placedId = null;
+  if (hit && hit.type === 'city' && hit.open) {
+    mutate((P) => { delete hit.open; Object.assign(hit, { name: r.name, power: r.power, leader: r.leader, note: r.note }); if (!hit.trap) hit.trap = r.trap; P.roster = P.roster.filter((x) => x.id !== r.id); });
+    placedId = hit.id;
+  } else if (hit) { toast('That place is taken. Tap a see-through spot or an empty tile.'); return; }
+  else {
+    const t = placeTarget('city', f);
+    if (!validAt('city', t.x, t.y, null)) { toast('No room there. Try another tile.'); return; }
+    const o = { id: uid(), type: 'city', x: t.x, y: t.y, name: r.name, power: r.power, leader: r.leader, note: r.note, trap: r.trap };
+    if (!o.trap) { const nt = nearestTrap(o); if (nt) o.trap = nt.type === 'trap1' ? 1 : 2; }
+    mutate((P) => { P.objects.push(o); P.roster = P.roster.filter((x) => x.id !== r.id); });
+    placedId = o.id;
+  }
+  assignId = null; sel = placedId; ghost = null; updateAssignBar(); refreshUI(); requestRender();
+  toast(`${r.name} placed.`);
+}
+function placeFromRoster(ids) {
+  const list = plan.roster.filter((r) => ids.includes(r.id));
+  if (!list.length) return;
+  if (!trapObj(1) && !trapObj(2)) { toast('Place at least one bear trap first.'); return; }
+  let res = null;
+  mutate((P) => {
+    const members = list.map((r) => ({ name: r.name, power: r.power, leader: r.leader, note: r.note, trap: r.trap }));
+    res = fillAndPlace(P, members, 'balance', true, 'add');
+  });
+  if (assignId && ids.includes(assignId)) assignId = null;
+  updateAssignBar(); refreshUI();
+  const fl = res ? res.filled || 0 : 0, pl = res ? res.placed.length : 0;
+  toast(list.length === 1 ? `${list[0].name} placed${fl ? ' in the best open spot' : ''}.` : `${fl + pl} members placed${fl ? `, ${fl} in open spots` : ''}.`);
 }
 function spotRanks(P) {
   const ranks = {};
@@ -816,8 +909,8 @@ function drawObject(ctx, ob, x, y, o, X, Y, cov, pv) {
     if (ob.open) {
       const base = (pv && !pv.valid) ? 0.5 : 1;
       rr(ctx, bx, by, bw, bw, Math.max(2, s * 0.22));
-      ctx.save(); ctx.globalAlpha = 0.14 * base; ctx.fillStyle = main; ctx.fill();
-      ctx.globalAlpha = 0.8 * base; ctx.strokeStyle = main; ctx.lineWidth = Math.max(1, s * 0.07);
+      ctx.save(); ctx.globalAlpha = (o.assigning ? 0.3 : 0.14) * base; ctx.fillStyle = main; ctx.fill();
+      ctx.globalAlpha = (o.assigning ? 1 : 0.8) * base; ctx.strokeStyle = main; ctx.lineWidth = Math.max(1, s * 0.07);
       ctx.setLineDash([Math.max(3, s * 0.24), Math.max(2, s * 0.16)]); ctx.stroke(); ctx.restore();
       const rk = o.spotRank && o.spotRank[ob.id];
       if (rk && s >= 9) {
@@ -866,7 +959,7 @@ function requestRender() {
   raf = requestAnimationFrame(() => {
     raf = 0; if (!pal) readPal();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawScene(ctx, { W, H, s: view.s, ox: view.ox, oy: view.oy, pal, plan, sel, ghost, preview });
+    drawScene(ctx, { W, H, s: view.s, ox: view.ox, oy: view.oy, pal, plan, sel, ghost, preview, assigning: !!assignId });
   });
 }
 function contentBox(P, margin) {
@@ -900,6 +993,7 @@ const ptrs = new Map(); let gest = null;
 function placeTarget(type, f) { const n = SIZES[type]; return { x: Math.round(f.x - n / 2), y: Math.round(f.y - n / 2), size: n }; }
 function validAt(type, x, y, excludeId) { const n = SIZES[type]; return fits(plan, occGrid(plan, excludeId), x, y, n, 0); }
 function placingGhost(f) {
+  if (assignId && tool === 'select' && !readOnly) return assignGhost(f);
   if (readOnly || tool === 'select' || tool === 'erase') return null;
   const t = placeTarget(tool, f); const ex = UNIQUE[tool] ? (trapObjOrHq(tool) || {}).id : null;
   return { x: t.x, y: t.y, size: t.size, valid: validAt(tool, t.x, t.y, ex) };
@@ -930,6 +1024,7 @@ cv.addEventListener('pointerdown', (e) => {
   }
   if (ptrs.size > 2) return;
   const f = toTileF(p); const hit = hitTest(Math.floor(f.x), Math.floor(f.y));
+  if (assignId && tool === 'select' && !readOnly) { gest = { type: 'assign', start: p, ox: view.ox, oy: view.oy, moved: false }; ghost = assignGhost(f); requestRender(); return; }
   if (tool === 'select') {
     if (hit) {
       selectObj(hit.id);
@@ -957,7 +1052,7 @@ cv.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'mouse') {
       const f = toTileF(p); ghost = placingGhost(f);
       const hit = tool === 'select' || tool === 'erase' ? hitTest(Math.floor(f.x), Math.floor(f.y)) : null;
-      cv.style.cursor = tool === 'select' ? (hit && !readOnly ? 'grab' : 'default') : tool === 'erase' ? (hit ? 'pointer' : 'default') : 'crosshair';
+      cv.style.cursor = assignId && tool === 'select' ? 'copy' : tool === 'select' ? (hit && !readOnly ? 'grab' : 'default') : tool === 'erase' ? (hit ? 'pointer' : 'default') : 'crosshair';
       requestRender();
     }
     return;
@@ -970,11 +1065,11 @@ cv.addEventListener('pointermove', (e) => {
     const f = toTileF(p); const x = Math.round(f.x - gest.dx), y = Math.round(f.y - gest.dy);
     preview = { id: ob.id, x, y, valid: validAt(ob.type, x, y, ob.id) };
     cv.style.cursor = 'grabbing'; requestRender();
-  } else if (gest.moved && (gest.type === 'pan' || gest.type === 'place' || gest.type === 'erase')) {
+  } else if (gest.moved && (gest.type === 'pan' || gest.type === 'place' || gest.type === 'erase' || gest.type === 'assign')) {
     view.ox = gest.ox + (p.x - gest.start.x); view.oy = gest.oy + (p.y - gest.start.y);
-    if (gest.type === 'place') ghost = null;
+    if (gest.type === 'place' || gest.type === 'assign') ghost = null;
     requestRender();
-  } else if (gest.type === 'place') { ghost = placingGhost(toTileF(p)); requestRender(); }
+  } else if (gest.type === 'place' || gest.type === 'assign') { ghost = placingGhost(toTileF(p)); requestRender(); }
 });
 function endPointer(e, cancelled) {
   const p = ptrs.get(e.pointerId) || evPos(e);
@@ -995,6 +1090,9 @@ function endPointer(e, cancelled) {
   } else if (g.type === 'place') {
     if (!g.moved) placeAt(toTileF(p));
     ghost = e.pointerType === 'mouse' ? placingGhost(toTileF(p)) : null; requestRender();
+  } else if (g.type === 'assign') {
+    if (!g.moved) assignAt(toTileF(p));
+    ghost = e.pointerType === 'mouse' && assignId ? placingGhost(toTileF(p)) : null; requestRender();
   } else if (g.type === 'erase') {
     if (!g.moved) { const f = toTileF(p); const hit = hitTest(Math.floor(f.x), Math.floor(f.y)); if (hit) removeObj(hit.id); }
   }
@@ -1011,14 +1109,22 @@ cv.addEventListener('wheel', (e) => {
 $('#zoomIn').onclick = () => zoomAt(1.25, W / 2, H / 2);
 $('#zoomOut').onclick = () => zoomAt(0.8, W / 2, H / 2);
 $('#zoomFit').onclick = fitView;
+$('#assignCancel').onclick = () => cancelAssign();
 
 function selectObj(id) { sel = id; if (tab !== 'sel' && window.innerWidth > 900) setTab('sel'); refreshUI(); requestRender(); }
-function removeObj(id) { const ob = byId(id); if (!ob) return; mutate((P) => { P.objects = P.objects.filter((o) => o.id !== id); }); if (sel === id) sel = null; refreshUI(); }
+function removeObj(id) {
+  const ob = byId(id); if (!ob) return;
+  const back = ob.type === 'city' && !ob.open && ob.name && !ob.example;
+  mutate((P) => { if (back) P.roster.push(toRoster(ob)); P.objects = P.objects.filter((o) => o.id !== id); });
+  if (sel === id) sel = null; refreshUI();
+  if (back) toast(`${ob.name} is back in the "Not placed yet" list.`);
+}
 function centerOn(o) { const c = centerOf(o); view.ox = W / 2 - c.x * view.s; view.oy = H / 2 - c.y * view.s; if (view.s < 18) { view.s = 18; view.ox = W / 2 - c.x * 18; view.oy = H / 2 - c.y * 18; } requestRender(); }
 
 /* ---------- tools + keys ---------- */
 function setTool(t) {
   if (readOnly && t !== 'select') return;
+  if (t !== 'select' && assignId) { assignId = null; updateAssignBar(); }
   tool = t; ghost = null;
   document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
   $('#hint').innerHTML = readOnly ? '<b>View only.</b> Drag to pan · scroll or pinch to zoom' : HINTS[t];
@@ -1035,7 +1141,7 @@ document.addEventListener('keydown', (e) => {
   const map = { v: 'select', c: 'city', 1: 'trap1', 2: 'trap2', h: 'hq', b: 'banner', x: 'block', e: 'erase' };
   if (map[k]) { setTool(map[k]); return; }
   if (k === 'f') { fitView(); return; }
-  if (k === 'escape') { setTool('select'); sel = null; refreshUI(); requestRender(); return; }
+  if (k === 'escape') { if (assignId) { cancelAssign(); return; } setTool('select'); sel = null; refreshUI(); requestRender(); return; }
   if ((k === 'delete' || k === 'backspace') && sel) { e.preventDefault(); removeObj(sel); return; }
   const arrows = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] };
   if (arrows[k] && sel && !readOnly) {
@@ -1060,10 +1166,12 @@ function refreshUI() {
   $('#planTitle').textContent = plan.name || 'Bear Trap Planner';
   const cities = plan.objects.filter((o) => o.type === 'city');
   const nOpen = cities.filter((c) => c.open).length, nPl = cities.length - nOpen;
-  $('#planSub').textContent = `${nPl} ${nPl === 1 ? 'player' : 'players'}${nOpen ? ` · ${nOpen} open ${nOpen === 1 ? 'spot' : 'spots'}` : ''} · ${plan.grid.w}×${plan.grid.h} tiles`;
+  const nList = plan.roster.length;
+  $('#planSub').textContent = `${nPl} placed${nList ? ` · ${nList} not placed` : ''}${nOpen ? ` · ${nOpen} open ${nOpen === 1 ? 'spot' : 'spots'}` : ''} · ${plan.grid.w}×${plan.grid.h} tiles`;
   $('#btnUndo').disabled = readOnly || !undoStack.length;
   $('#btnRedo').disabled = readOnly || !redoStack.length;
-  $('#onboard').hidden = readOnly || onboardDismissed || cities.length > 0;
+  $('#onboard').hidden = readOnly || onboardDismissed || cities.length > 0 || plan.roster.length > 0;
+  updateAssignBar();
   document.querySelectorAll('.tool').forEach((b) => { if (b.dataset.tool !== 'select') b.disabled = readOnly; });
   renderSel(); renderMembers(); renderSettings();
 }
@@ -1099,12 +1207,12 @@ function renderSel() {
   } else {
     h += `<div class="readout">${pos}</div>`;
   }
-  if (!readOnly && ob.type === 'city' && !ob.open) h += `<button class="btn block" id="fClear" style="margin-bottom:8px">Move player out, keep spot open</button>`;
+  if (!readOnly && ob.type === 'city' && !ob.open) h += `<button class="btn block" id="fClear" style="margin-bottom:8px">Move to "Not placed yet", keep spot open</button>`;
   if (!readOnly) h += `<button class="btn danger block" id="fDelete">Remove ${ob.type === 'city' ? (ob.open ? 'spot' : 'city') : esc(NAMES[ob.type].toLowerCase())}</button>`;
   pane.innerHTML = h;
   const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
   on('fName', 'change', (e) => mutate(() => { ob.name = e.target.value.trim().slice(0, 40); if (ob.name) delete ob.open; }));
-  on('fClear', 'click', () => mutate(() => { emptySpot(ob); }));
+  on('fClear', 'click', () => { const nm = ob.name; mutate((P) => { emptySpot(ob, P); }); toast(`${nm} moved to "Not placed yet". The spot stays open.`); });
   on('fPower', 'change', (e) => { const v = e.target.value.trim(); const pw = v ? parsePower(v) : 0; if (pw === null) { toast('Write power like 37M, 850K or 37000000.'); e.target.value = fmtPower(ob.power); return; } mutate(() => { ob.power = pw; }); });
   on('fLeader', 'change', (e) => mutate(() => { ob.leader = e.target.checked; }));
   on('fNote', 'change', (e) => mutate(() => { ob.note = e.target.value.trim().slice(0, 80); }));
@@ -1130,6 +1238,8 @@ function renderMembers() {
   const sumP = (g) => g.reduce((a, r) => a + (r.c.power || 0), 0);
   const avgD = (g) => g.length ? (g.reduce((a, r) => a + (Number.isFinite(r.d) ? r.d : 0), 0) / g.length).toFixed(1) : '–';
   const hasEx = rows.some((r) => r.c.example);
+  const q = memberQuery.trim().toLowerCase();
+  const rosterAll = plan.roster;
   let h = `<div class="summary">
     <div class="sum t1"><div class="k"><span class="dot t1"></span>${esc(trapLabel(1))}</div><div class="v">${g1.length} players${sumP(g1) ? ' · ' + fmtPower(sumP(g1)) : ''}<br>${openN(1) ? openN(1) + ' open · ' : ''}avg ${avgD(g1)} tiles</div></div>
     <div class="sum t2"><div class="k"><span class="dot t2"></span>${esc(trapLabel(2))}</div><div class="v">${g2.length} players${sumP(g2) ? ' · ' + fmtPower(sumP(g2)) : ''}<br>${openN(2) ? openN(2) + ' open · ' : ''}avg ${avgD(g2)} tiles</div></div>
@@ -1140,15 +1250,28 @@ function renderMembers() {
     <div class="rowbtns" style="margin:8px 0 0"><button class="btn small" id="tEmpty">Empty all spots</button>${totalOpen ? '<button class="btn small danger" id="tRemove">Remove open spots</button>' : ''}</div>
   </details>`;
   if (hasEx && !readOnly) h += `<div class="notice"><span>These are example cities, not your members.</span><button class="btn small" id="mRemoveEx">Remove examples</button></div>`;
-  if (rows.length > 8) h += `<div class="field"><input class="inp" id="mSearch" type="search" placeholder="Find a player…" value="${esc(memberQuery)}" aria-label="Find a player"></div>`;
+  if (rows.length + rosterAll.length > 8) h += `<div class="field"><input class="inp" id="mSearch" type="search" placeholder="Find a player…" value="${esc(memberQuery)}" aria-label="Find a player"></div>`;
   h += `<div class="rowbtns">${readOnly ? '' : '<button class="btn small primary" id="mAdd">Add members</button><button class="btn small" id="mRepack" title="Move every city as close to its trap as possible, strongest first">Re-pack</button>'}<button class="btn small" id="mCopy">Copy list</button></div>`;
-  if (!rows.length && totalOpen) {
+  if (rosterAll.length) {
+    const list = sortMembers(rosterAll).filter((r) => !q || r.name.toLowerCase().includes(q));
+    h += `<div class="group-h unplaced"><span>Not placed yet (${rosterAll.length})</span>${readOnly ? '' : `<button class="linkbtn" id="rPlaceAll">Place all${totalOpen ? ' in open spots' : ''}</button>`}</div>`;
+    if (!readOnly) h += `<p class="small muted" style="margin:0 0 4px">Tap a name, then tap a see-through spot on the map. <b>Auto</b> picks the best open spot.</p>`;
+    h += '<div class="mlist">';
+    for (const r of list) {
+      h += `<div class="rrow${assignId === r.id ? ' on' : ''}"><button class="rmain" data-r="${esc(r.id)}" aria-pressed="${assignId === r.id}" ${readOnly ? 'disabled' : ''}><span class="dot t${r.trap}"></span>
+        <span class="n">${r.leader ? '<span class="star">★</span> ' : ''}${esc(r.name)}</span><span class="p">${fmtPower(r.power)}</span></button>${readOnly ? '' : `<button class="btn small" data-auto="${esc(r.id)}">Auto</button><button class="rx" data-del="${esc(r.id)}" aria-label="Remove ${esc(r.name)} from the list" title="Remove from list">×</button>`}</div>`;
+    }
+    if (!list.length) h += '<p class="small muted">No match.</p>';
+    h += '</div>';
+  }
+  if (!rows.length && rosterAll.length) {
+    h += '';
+  } else if (!rows.length && totalOpen) {
     h += `<div class="empty"><div>No players yet. Use <b>Add members</b> and they fill the ${totalOpen} open spots, closest first. Or tap a spot on the map and type a name.</div></div>`;
   } else if (!rows.length) {
     h += `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg><div>No cities yet. Use <b>Add members</b> to paste your alliance list, or pick the City tool and click the map.</div></div>`;
   } else {
     const cov = plan.settings.territory ? coverage(plan) : null;
-    const q = memberQuery.trim().toLowerCase();
     const group = (title, g) => {
       if (q) g = g.filter((r) => (r.c.name || '').toLowerCase().includes(q));
       if (!g.length) return '';
@@ -1167,6 +1290,10 @@ function renderMembers() {
   pane.innerHTML = h;
   const ms = document.getElementById('mSearch');
   if (ms) { ms.addEventListener('input', (e) => { memberQuery = e.target.value; renderMembers(); }); if (hadFocus) { ms.focus(); ms.setSelectionRange(ms.value.length, ms.value.length); } }
+  pane.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => startAssign(b.dataset.r)));
+  pane.querySelectorAll('[data-auto]').forEach((b) => b.addEventListener('click', () => placeFromRoster([b.dataset.auto])));
+  pane.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { const id = b.dataset.del; if (assignId === id) assignId = null; mutate((P) => { P.roster = P.roster.filter((r) => r.id !== id); }); updateAssignBar(); }));
+  const pa = document.getElementById('rPlaceAll'); if (pa) pa.addEventListener('click', () => placeFromRoster(plan.roster.map((r) => r.id)));
   pane.querySelectorAll('.mrow').forEach((b) => b.addEventListener('click', () => { const o = byId(b.dataset.id); if (!o) return; sel = o.id; centerOn(o); refreshUI(); }));
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('mAdd', openAdd); on('mRepack', repack); on('mCopy', copyList);
@@ -1174,7 +1301,7 @@ function renderMembers() {
   const tc = document.getElementById('tCount'); if (tc) tc.addEventListener('change', () => { tplCount = clamp(int(tc.value, 20), 1, 200); });
   on('tAdd', () => { tplCount = clamp(int(document.getElementById('tCount').value, 20), 1, 200); addOpenSpots(tplCount); });
   const te = document.getElementById('tEmpty');
-  if (te) armConfirm(te, 'Empty all spots', () => { mutate((P) => P.objects.forEach((o) => { if (o.type === 'city') emptySpot(o); })); toast('All players moved out. The spots stay as an empty template. Undo to go back.'); });
+  if (te) armConfirm(te, 'Empty all spots', () => { mutate((P) => P.objects.forEach((o) => { if (o.type === 'city') emptySpot(o, P); })); toast('All players moved to "Not placed yet". The spots stay as an empty template.'); });
   const tr = document.getElementById('tRemove');
   if (tr) armConfirm(tr, 'Remove open spots', () => { mutate((P) => { P.objects = P.objects.filter((o) => !(o.type === 'city' && o.open)); }); fixSel(); refreshUI(); });
   on('mRemoveEx', () => { mutate((P) => { P.objects = P.objects.filter((o) => !(o.type === 'city' && o.example)); }); sel = null; refreshUI(); });
@@ -1229,6 +1356,16 @@ $('#addModal').addEventListener('click', (e) => { if (e.target.id === 'addModal'
 $('#addGo').onclick = () => {
   const members = parseMembers($('#addText').value);
   if (!members.length) { $('#addMsg').textContent = 'Paste at least one name, one per line.'; return; }
+  if ($('#addListOnly').checked) {
+    const placed = new Set(plan.objects.filter((o) => o.type === 'city' && !o.open && o.name).map((o) => o.name.toLowerCase()));
+    const listed = new Set(plan.roster.map((r) => r.name.toLowerCase()));
+    const add = members.filter((m) => { const k = m.name.toLowerCase(); if (placed.has(k) || listed.has(k)) return false; listed.add(k); return true; });
+    if (add.length) mutate((P) => { add.forEach((m) => P.roster.push({ id: uid(), name: m.name, power: m.power || 0, leader: !!m.leader, note: '', trap: m.trap || 0 })); });
+    closeAdd(); $('#addText').value = ''; setTab('mem');
+    const skip = members.length - add.length;
+    toast(`${add.length} added to "Not placed yet"${skip ? `, ${skip} already in the plan` : ''}.`);
+    return;
+  }
   if (!trapObj(1) && !trapObj(2)) { $('#addMsg').textContent = 'Place at least one bear trap on the map first.'; return; }
   const res = placeMembers(members, $('#addSplit').value, $('#addStrong').checked, $('#addMode').value);
   closeAdd(); $('#addText').value = ''; setTab('mem');
@@ -1251,6 +1388,7 @@ function listText() {
     lines.push('', n ? trapLabel(n) : 'No group');
     g.forEach((r, i) => lines.push(`${i + 1}. ${r.c.leader ? '★ ' : ''}${r.c.name || 'City'}: X ${plan.grid.ox + r.c.x}, Y ${plan.grid.oy + r.c.y}${r.c.note ? ' (' + r.c.note + ')' : ''}`));
   }
+  if (plan.roster.length) { lines.push('', 'Not placed yet'); sortMembers(plan.roster).forEach((r) => lines.push(`- ${r.leader ? '★ ' : ''}${r.name}`)); }
   return lines.join('\n');
 }
 function copyList() {
@@ -1388,7 +1526,7 @@ function renderMapPage() {
   const all = sortedCities(); const rows = all.filter((r) => !r.c.open); const nOpen = all.length - rows.length;
   const n1 = rows.filter((r) => r.c.trap === 1).length, n2 = rows.filter((r) => r.c.trap === 2).length;
   const date = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
-  pageHeader(g, plan.name, `${date} · ${rows.length} players · ${trapLabel(1)}: ${n1} · ${trapLabel(2)}: ${n2}${nOpen ? ` · ${nOpen} open spots` : ''}`);
+  pageHeader(g, plan.name, `${date} · ${rows.length} players · ${trapLabel(1)}: ${n1} · ${trapLabel(2)}: ${n2}${nOpen ? ` · ${nOpen} open spots` : ''}${plan.roster.length ? ` · ${plan.roster.length} not placed` : ''}`);
   const ax = 150, ay = 270, aw = PW - 240, ah = PH - 270 - 190;
   const b = contentBox(plan, 2);
   const s = Math.min(aw / b.w, ah / b.h);
@@ -1421,7 +1559,8 @@ function renderMapPage() {
   return c;
 }
 function renderTablePages() {
-  const rows = sortedCities().filter((r) => !r.c.open); if (!rows.length) return [];
+  const rows = sortedCities().filter((r) => !r.c.open).concat(sortMembers(plan.roster).map((r) => ({ c: Object.assign({}, r, { trap: 0 }), d: Infinity, unplaced: true })));
+  if (!rows.length) return [];
   const per = 22, pages = [];
   const cols = [{ x: 90, t: '#' }, { x: 180, t: 'Player' }, { x: 1180, t: 'Group' }, { x: 1560, t: 'Role' }, { x: 1890, t: 'Power', r: true, rx: 2120 }, { x: 2200, t: 'X : Y' }, { x: 2560, t: 'Tiles to trap', r: true, rx: 2880 }];
   const total = Math.ceil(rows.length / per);
@@ -1443,14 +1582,14 @@ function renderTablePages() {
       if (cc.leader) { g.fillStyle = PRINT.focus; star(g, nx + 16, cy, 17); nx += 44; }
       g.fillStyle = '#172033'; g.font = `600 36px ${FONT_UI}`; g.fillText(fitText(g, cc.name || 'City', 1180 - nx - 30), nx, cy);
       const [main, soft, ink] = trapColors(cc.trap, PRINT);
-      const gl = cc.trap ? trapLabel(cc.trap) : 'No group';
+      const gl = r.unplaced ? 'Not placed' : cc.trap ? trapLabel(cc.trap) : 'No group';
       g.font = `700 28px ${FONT_HEAD}`; const gw = g.measureText(gl).width + 36;
       rr(g, 1180, cy - 22, gw, 44, 22); g.fillStyle = soft; g.fill(); g.strokeStyle = main; g.lineWidth = 2.5; g.stroke();
       g.fillStyle = ink; g.fillText(gl, 1198, cy + 1);
       g.font = `500 32px ${FONT_UI}`; g.fillStyle = '#172033';
       g.fillText(cc.leader ? 'Rally leader' : 'Member', 1560, cy);
       g.textAlign = 'right'; g.fillText(fmtPower(cc.power) || '–', 2120, cy);
-      g.textAlign = 'left'; g.font = `600 34px ${FONT_UI}`; g.fillText(`${plan.grid.ox + cc.x} : ${plan.grid.oy + cc.y}`, 2200, cy);
+      g.textAlign = 'left'; g.font = `600 34px ${FONT_UI}`; g.fillText(r.unplaced ? '–' : `${plan.grid.ox + cc.x} : ${plan.grid.oy + cc.y}`, 2200, cy);
       g.textAlign = 'right'; g.font = `500 32px ${FONT_UI}`; g.fillText(Number.isFinite(r.d) ? r.d.toFixed(1) : '–', 2880, cy);
       if (cc.note) { g.textAlign = 'left'; g.fillStyle = '#5A6377'; g.font = `italic 400 24px ${FONT_UI}`; }
       y += rh;
@@ -1482,7 +1621,7 @@ try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change
 new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 new ResizeObserver(resize).observe(stage);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestRender());
-window.__btp = { get plan() { return plan; }, placeMembers, exampleMembers, renderMapPage, renderTablePages };
+window.__btp = { get plan() { return plan; }, get view() { return view; }, placeMembers, exampleMembers, renderMapPage, renderTablePages };
 setTool('select'); setTab('mem'); readPal(); refreshUI(); resize(); showOfficial();
 loadOfficialFile();
 })();
