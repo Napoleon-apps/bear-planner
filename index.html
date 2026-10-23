@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bear Trap Planner</title>
+<meta name="description" content="Kingshot bear trap city layout for our alliance. Find your city, see the coordinates and export the plan as a PDF.">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* Layout: a full-height planning board. Tool rail | tile map | side panel; stacks into one column on phones. */
+:root{
+  --bg:#E8ECF2; --surface:#FFFFFF; --surface2:#F2F4F8; --ink:#172033; --muted:#5A6377; --line:#D5DBE5;
+  --primary:#1B2338; --on-primary:#FFFFFF; --accent:#C98E22; --focus:#C98E22;
+  --ground:#E1E7D8; --outside:#D0D6CB; --grid:rgba(23,32,51,.07); --grid-major:rgba(23,32,51,.17);
+  --t1:#C98A1E; --t1-soft:#F6E3BC; --t1-ink:#5E3E06;
+  --t2:#2C7FB0; --t2-soft:#D0E6F4; --t2-ink:#103A55;
+  --city:#8790A3; --city-soft:#F2F4F8; --city-ink:#252D40;
+  --hq:#1B2338; --hq-ink:#F3D58E; --banner:#6B4FA0; --block:#9AA19A;
+  --terr:rgba(44,127,176,.11); --terr-line:rgba(44,127,176,.6);
+  --danger:#C2412F; --ok:#2F8A57;
+  --font-ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-head:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0D1320; --surface:#151D2E; --surface2:#1B2539; --ink:#E5E9F1; --muted:#98A2B7; --line:#29334B;
+  --primary:#E8B04B; --on-primary:#18202F; --accent:#E8B04B; --focus:#F0C266;
+  --ground:#17231E; --outside:#0F1815; --grid:rgba(229,233,241,.06); --grid-major:rgba(229,233,241,.15);
+  --t1:#E3A63A; --t1-soft:#3B2E16; --t1-ink:#F7DDA6;
+  --t2:#4FA6DA; --t2-soft:#163044; --t2-ink:#C2E2F6;
+  --city:#7A849A; --city-soft:#222C41; --city-ink:#DDE3EF;
+  --hq:#0A0F1A; --hq-ink:#E8B04B; --banner:#9F86D4; --block:#4B534D;
+  --terr:rgba(79,166,218,.13); --terr-line:rgba(79,166,218,.65);
+  --danger:#E66A53; --ok:#52B87F; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0D1320; --surface:#151D2E; --surface2:#1B2539; --ink:#E5E9F1; --muted:#98A2B7; --line:#29334B;
+  --primary:#E8B04B; --on-primary:#18202F; --accent:#E8B04B; --focus:#F0C266;
+  --ground:#17231E; --outside:#0F1815; --grid:rgba(229,233,241,.06); --grid-major:rgba(229,233,241,.15);
+  --t1:#E3A63A; --t1-soft:#3B2E16; --t1-ink:#F7DDA6;
+  --t2:#4FA6DA; --t2-soft:#163044; --t2-ink:#C2E2F6;
+  --city:#7A849A; --city-soft:#222C41; --city-ink:#DDE3EF;
+  --hq:#0A0F1A; --hq-ink:#E8B04B; --banner:#9F86D4; --block:#4B534D;
+  --terr:rgba(79,166,218,.13); --terr-line:rgba(79,166,218,.65);
+  --danger:#E66A53; --ok:#52B87F; color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--font-ui); font-size:14px; line-height:1.4;
+  padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:12px; box-sizing:border-box; font-variant-numeric:tabular-nums;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+
+.app{height:100%; display:grid; grid-template-rows:auto 1fr; gap:10px; min-height:0}
+.top{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+.brand{display:flex; align-items:center; gap:10px; min-width:0; flex:1 1 220px}
+.brand svg{flex:none}
+.brand h1{font-family:var(--font-head); font-weight:700; font-size:22px; letter-spacing:.01em; margin:0; line-height:1.05; text-wrap:balance}
+.brand .sub{display:block; color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.status{font-size:12.5px; color:var(--muted); display:flex; align-items:center; gap:6px; white-space:nowrap}
+.status .btn{margin-left:4px}
+.status i{width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block}
+.status[data-s="saved"] i{background:var(--ok)}
+.status[data-s="saving"] i{background:var(--accent)}
+.status[data-s="error"] i{background:var(--danger)}
+.actions{display:flex; gap:6px; flex-wrap:wrap}
+.btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:7px 12px; font-weight:600; font-size:13.5px; display:inline-flex; align-items:center; gap:6px}
+.btn:hover{border-color:var(--muted)}
+.btn:disabled{opacity:.45; cursor:default}
+.btn.primary{background:var(--primary); color:var(--on-primary); border-color:var(--primary)}
+.btn.danger{color:var(--danger)}
+.btn.small{padding:5px 9px; font-size:12.5px}
+.btn.block{width:100%; justify-content:center}
+
+.main{display:grid; grid-template-columns:64px minmax(0,1fr) 340px; gap:10px; min-height:0}
+.tools{display:flex; flex-direction:column; gap:4px; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:6px; overflow:auto}
+.tool{border:0; background:transparent; border-radius:8px; padding:6px 2px 5px; display:flex; flex-direction:column; align-items:center; gap:3px; font-size:11px; font-weight:600; color:var(--muted)}
+.tool svg{width:24px; height:24px}
+.tool:hover{background:var(--surface2); color:var(--ink)}
+.tool[aria-pressed="true"]{background:var(--primary); color:var(--on-primary)}
+.tools hr{border:0; border-top:1px solid var(--line); margin:4px 6px; width:auto}
+
+.stage{position:relative; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--outside); min-height:0}
+#map{position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block}
+.zoom{position:absolute; right:10px; bottom:10px; display:flex; gap:4px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:3px}
+.zoom button{border:0; background:transparent; min-width:32px; height:30px; border-radius:6px; font-weight:700; font-size:15px}
+.zoom button:hover{background:var(--surface2)}
+.hint{position:absolute; left:10px; bottom:10px; max-width:calc(100% - 170px); background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:6px 10px; font-size:12.5px; color:var(--muted)}
+.hint b{color:var(--ink); font-weight:600}
+.onboard{position:absolute; left:12px; top:12px; width:min(330px, calc(100% - 24px)); background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 14px 12px; box-shadow:0 8px 28px rgba(10,15,30,.16)}
+.onboard h2{font-family:var(--font-head); font-size:19px; margin:0 0 4px; text-wrap:balance}
+.onboard p{margin:0 0 10px; color:var(--muted)}
+.onboard .row{display:flex; gap:6px; flex-wrap:wrap}
+.onboard .x{position:absolute; right:8px; top:6px; border:0; background:transparent; font-size:18px; color:var(--muted); width:28px; height:28px; border-radius:6px}
+
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; min-height:0; min-width:0}
+.tabs{display:flex; border-bottom:1px solid var(--line); padding:4px 6px 0}
+.tab{flex:1; border:0; background:transparent; padding:9px 4px 8px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; font-size:13.5px}
+.tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+.pane{padding:14px; overflow:auto; min-height:0; flex:1}
+.pane h3{font-family:var(--font-head); font-size:17px; margin:0 0 8px; display:flex; align-items:center; gap:8px}
+.label{display:block; font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 4px}
+.field{margin-bottom:12px}
+.inp{width:100%; border:1px solid var(--line); background:var(--surface2); border-radius:8px; padding:7px 9px}
+.inp:focus{border-color:var(--accent); outline:none}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.seg{display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden}
+.seg button{flex:1; border:0; background:var(--surface2); padding:7px 4px; font-weight:600; font-size:13px; color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--primary); color:var(--on-primary)}
+.check{display:flex; align-items:center; gap:8px; margin-bottom:9px; cursor:pointer}
+.check input{width:16px; height:16px; accent-color:var(--accent)}
+.readout{background:var(--surface2); border-radius:8px; padding:8px 10px; font-size:13px; margin-bottom:12px}
+.readout b{font-weight:600}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.empty{color:var(--muted); text-align:center; padding:26px 10px}
+.empty svg{opacity:.5; margin-bottom:6px}
+.sep{border:0; border-top:1px solid var(--line); margin:14px 0}
+
+.summary{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px}
+.sum{border-radius:10px; padding:9px 10px; border:1px solid var(--line)}
+.sum .k{font-family:var(--font-head); font-weight:700; font-size:14px; display:flex; align-items:center; gap:6px}
+.sum .v{font-size:12.5px; color:var(--muted)}
+.sum.t1 .k{color:var(--t1)} .sum.t2 .k{color:var(--t2)}
+.dot{width:10px; height:10px; border-radius:3px; display:inline-block; flex:none}
+.dot.t1{background:var(--t1)} .dot.t2{background:var(--t2)} .dot.t0{background:var(--city)}
+.rowbtns{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
+.notice{background:var(--t1-soft); color:var(--t1-ink); border-radius:8px; padding:8px 10px; font-size:12.5px; margin-bottom:12px; display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap}
+.group-h{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:12px 0 4px; display:flex; justify-content:space-between}
+.mlist{display:flex; flex-direction:column}
+.mrow{display:grid; grid-template-columns:18px minmax(0,1fr) auto auto; align-items:center; gap:8px; border:0; background:transparent; text-align:left; padding:6px 6px; border-radius:7px; font-size:13.5px}
+.mrow:hover{background:var(--surface2)}
+.mrow[aria-current="true"]{background:var(--surface2); box-shadow:inset 0 0 0 1.5px var(--accent)}
+.mrow .n{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600}
+.mrow .p{color:var(--muted); font-size:12.5px}
+.mrow .d{font-size:12.5px; min-width:44px; text-align:right}
+.star{color:var(--accent)}
+.warn{color:var(--danger); font-weight:700}
+.tag{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-left:4px}
+
+.modal{position:fixed; inset:0; background:rgba(8,12,22,.5); display:flex; align-items:center; justify-content:center; padding:16px; z-index:20}
+.sheet{background:var(--surface); border-radius:14px; border:1px solid var(--line); width:min(560px,100%); max-height:100%; overflow:auto; padding:18px}
+.sheet h2{font-family:var(--font-head); font-size:22px; margin:0 0 4px}
+.sheet textarea{min-height:170px; resize:vertical; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:13px}
+.sheet .foot{display:flex; justify-content:flex-end; gap:8px; margin-top:6px}
+code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:12.5px; background:var(--surface2); padding:1px 5px; border-radius:4px}
+.toast{position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); background:var(--primary); color:var(--on-primary); padding:9px 14px; border-radius:9px; font-weight:600; font-size:13.5px; z-index:30; max-width:calc(100% - 32px); box-shadow:0 8px 24px rgba(0,0,0,.2)}
+
+@media (max-width:900px){
+  html,body{height:auto}
+  .app{height:auto}
+  .main{grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto auto}
+  .tools{flex-direction:row; overflow-x:auto; padding:5px}
+  .tool{min-width:56px; flex:none}
+  .tools hr{border-top:0; border-left:1px solid var(--line); margin:4px 2px}
+  .stage{height:min(62vh, 560px)}
+  .panel{max-height:none}
+  .pane{overflow:visible}
+  .hint{display:none}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important; animation:none!important} }
+</style>
+
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="8" fill="var(--primary)"/><g fill="var(--accent)"><ellipse cx="17" cy="21" rx="6.5" ry="5.4"/><ellipse cx="9.6" cy="14.4" rx="2.4" ry="3.1"/><ellipse cx="14.2" cy="10.2" rx="2.4" ry="3.1"/><ellipse cx="19.8" cy="10.2" rx="2.4" ry="3.1"/><ellipse cx="24.4" cy="14.4" rx="2.4" ry="3.1"/></g></svg>
+      <div style="min-width:0"><h1 id="planTitle">Bear Trap Planner</h1><span class="sub" id="planSub">Kingshot city layout</span></div>
+    </div>
+    <div class="status" id="status" data-s="saved"><i></i><span>Official plan</span><button class="btn small" id="btnOfficial" hidden>Back to official plan</button></div>
+    <div class="actions">
+      <button class="btn" id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn" id="btnRedo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <button class="btn primary" id="btnPdf">Export PDF</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav class="tools" id="tools" aria-label="Tools">
+      <button class="tool" data-tool="select" aria-pressed="true" title="Move and select (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.6L10 19z"/></svg>Move</button>
+      <hr>
+      <button class="tool" data-tool="city" title="Place city, 2×2 (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16" opacity=".5"/></svg>City</button>
+      <button class="tool" data-tool="trap1" title="Place Bear Trap 1, 3×3 (1)"><svg viewBox="0 0 24 24" fill="var(--t1)"><ellipse cx="12" cy="15" rx="5" ry="4.2"/><ellipse cx="6" cy="9.6" rx="1.9" ry="2.5"/><ellipse cx="9.8" cy="6.4" rx="1.9" ry="2.5"/><ellipse cx="14.2" cy="6.4" rx="1.9" ry="2.5"/><ellipse cx="18" cy="9.6" rx="1.9" ry="2.5"/></svg>Trap 1</button>
+      <button class="tool" data-tool="trap2" title="Place Bear Trap 2, 3×3 (2)"><svg viewBox="0 0 24 24" fill="var(--t2)"><ellipse cx="12" cy="15" rx="5" ry="4.2"/><ellipse cx="6" cy="9.6" rx="1.9" ry="2.5"/><ellipse cx="9.8" cy="6.4" rx="1.9" ry="2.5"/><ellipse cx="14.2" cy="6.4" rx="1.9" ry="2.5"/><ellipse cx="18" cy="9.6" rx="1.9" ry="2.5"/></svg>Trap 2</button>
+      <button class="tool" data-tool="hq" title="Place Alliance HQ, 3×3 (H)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20V9h3v2h3V9h4v2h3V9h3v11h-6v-4a2 2 0 0 0-4 0v4z"/></svg>HQ</button>
+      <button class="tool" data-tool="banner" title="Place banner, 1×1 (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 21V3"/><path d="M6 4h12l-3 4 3 4H6" fill="currentColor" fill-opacity=".25"/></svg>Banner</button>
+      <button class="tool" data-tool="block" title="Mark blocked tile, 1×1 (X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12l8-8M4 20L20 4M12 20l8-8" opacity=".7"/></svg>Block</button>
+      <hr>
+      <button class="tool" data-tool="erase" title="Remove (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Remove</button>
+    </nav>
+
+    <section class="stage" id="stage">
+      <canvas id="map" aria-label="Map grid. Use the tools to place cities, bear traps and the alliance HQ." tabindex="0"></canvas>
+      <div class="onboard" id="onboard" hidden>
+        <button class="x" id="onboardClose" aria-label="Close">×</button>
+        <h2>Place your alliance</h2>
+        <p>Paste your member list and every city gets placed around the bear traps, with the strongest players closest.</p>
+        <div class="row">
+          <button class="btn primary" id="onboardAdd">Add members</button>
+          <button class="btn" id="onboardExample">Show example</button>
+        </div>
+      </div>
+      <div class="hint" id="hint"></div>
+      <div class="zoom">
+        <button id="zoomOut" aria-label="Zoom out">−</button>
+        <button id="zoomFit" aria-label="Fit map" style="font-size:12.5px;font-weight:600">Fit</button>
+        <button id="zoomIn" aria-label="Zoom in">+</button>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-sel" data-tab="sel" aria-selected="false">Selected</button>
+        <button class="tab" role="tab" id="tab-mem" data-tab="mem" aria-selected="true">Members</button>
+        <button class="tab" role="tab" id="tab-map" data-tab="map" aria-selected="false">Map</button>
+      </div>
+      <div class="pane" id="pane-sel" hidden></div>
+      <div class="pane" id="pane-mem"></div>
+      <div class="pane" id="pane-map" hidden>
+        <div class="field"><label class="label" for="setName">Plan name</label><input class="inp" id="setName" maxlength="60"></div>
+        <div class="grid2">
+          <div class="field"><label class="label" for="setW">Map width</label><input class="inp" id="setW" type="number" min="12" max="150"></div>
+          <div class="field"><label class="label" for="setH">Map height</label><input class="inp" id="setH" type="number" min="12" max="150"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label class="label" for="setOX">In-game X of left edge</label><input class="inp" id="setOX" type="number"></div>
+          <div class="field"><label class="label" for="setOY">In-game Y of top edge</label><input class="inp" id="setOY" type="number"></div>
+        </div>
+        <p class="small muted" style="margin:-4px 0 12px">Set these to a real map coordinate so the city list shows positions you can type into the game.</p>
+        <hr class="sep">
+        <label class="check"><input type="checkbox" id="setRings"> Distance rings around traps</label>
+        <div class="field" id="ringRow"><label class="label" for="setStep">Ring every … tiles</label><input class="inp" id="setStep" type="number" min="1" max="20"></div>
+        <label class="check"><input type="checkbox" id="setCoords"> Show coordinates on the map</label>
+        <label class="check"><input type="checkbox" id="setTerr"> Alliance territory overlay</label>
+        <div id="terrRow">
+          <div class="grid2">
+            <div class="field"><label class="label" for="setHQT">HQ territory (tiles)</label><input class="inp" id="setHQT" type="number" min="3" max="61"></div>
+            <div class="field"><label class="label" for="setBanT">Banner territory (tiles)</label><input class="inp" id="setBanT" type="number" min="1" max="41"></div>
+          </div>
+          <p class="small muted" style="margin:-4px 0 12px">Width of the square each building claims. Check the numbers in-game and adjust. Cities outside the territory get a red marker.</p>
+        </div>
+        <div class="field"><label class="label" for="setGap">Auto-place spacing</label>
+          <select class="inp" id="setGap"><option value="0">Packed tight (no gap)</option><option value="1">1 tile between cities</option></select></div>
+        <hr class="sep">
+        <h3>Plan file</h3>
+        <p class="small muted" style="margin:0 0 8px">Save the plan as <code>plan.json</code> to update the official plan on GitHub, or load a plan file someone sent you.</p>
+        <div class="rowbtns">
+          <button class="btn small" id="btnExportJson">Save plan file</button>
+          <button class="btn small" id="btnImportJson">Load plan file</button>
+          <input type="file" id="fileImport" accept=".json,application/json" hidden>
+        </div>
+        <hr class="sep">
+        <div class="rowbtns">
+          <button class="btn small danger" id="btnClearCities">Remove all cities</button>
+          <button class="btn small danger" id="btnReset">Start from empty map</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="modal" id="addModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+    <h2 id="addTitle">Add members</h2>
+    <p class="muted small" style="margin:0 0 12px">One member per line. After the name you can add power, a trap number and <code>L</code> for rally leaders, separated by commas. Example: <code>Jaimy, 37M, 1, L</code></p>
+    <div class="field"><label class="label" for="addText">Member list</label>
+      <textarea class="inp" id="addText" placeholder="Jaimy, 37M, L&#10;SupremeMaster, 52M, 1&#10;Uğur, 28M&#10;NarcotiquE, 19.5M, 2"></textarea></div>
+    <div class="grid2">
+      <div class="field"><label class="label" for="addSplit">Trap assignment</label>
+        <select class="inp" id="addSplit"><option value="even">Split evenly by power</option><option value="1">All to Trap 1</option><option value="2">All to Trap 2</option><option value="0">Nearest trap, no group</option></select></div>
+      <div class="field"><label class="label" for="addMode">Existing cities</label>
+        <select class="inp" id="addMode"><option value="add">Keep and add these</option><option value="replace">Replace all cities</option></select></div>
+    </div>
+    <label class="check"><input type="checkbox" id="addStrong" checked> Rally leaders and strongest players closest to the trap</label>
+    <p class="small muted" id="addMsg" style="min-height:18px;margin:0 0 6px"></p>
+    <div class="foot">
+      <button class="btn" id="addCancel">Cancel</button>
+      <button class="btn primary" id="addGo">Place cities</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+'use strict';
+/* ---------- constants ---------- */
+const SIZES = { city: 2, trap1: 3, trap2: 3, hq: 3, banner: 1, block: 1 };
+const UNIQUE = { trap1: true, trap2: true, hq: true };
+const NAMES = { city: 'City', trap1: 'Bear Trap 1', trap2: 'Bear Trap 2', hq: 'Alliance HQ', banner: 'Banner', block: 'Blocked tile' };
+const ORDER = ['block', 'banner', 'hq', 'trap1', 'trap2', 'city'];
+const LS_KEY = 'bear-trap-planner:standalone:v1';
+const HINTS = {
+  select: '<b>Drag</b> a city to move it · drag empty space to pan · scroll or pinch to zoom',
+  city: '<b>Click a tile</b> to place a 2×2 city',
+  trap1: '<b>Click</b> to place Bear Trap 1 (3×3). Placing again moves it',
+  trap2: '<b>Click</b> to place Bear Trap 2 (3×3). Placing again moves it',
+  hq: '<b>Click</b> to place the Alliance HQ (3×3)',
+  banner: '<b>Click a tile</b> to place a banner (1×1)',
+  block: '<b>Click tiles</b> to mark rocks, rivers or other players',
+  erase: '<b>Click</b> anything to remove it'
+};
+const $ = (s) => document.querySelector(s);
+const uid = () => Math.random().toString(36).slice(2, 10);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const int = (v, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
+
+function fmtPower(p) {
+  if (!p) return '';
+  if (p >= 1e9) return (p / 1e9).toFixed(p >= 1e10 ? 0 : 1).replace(/\.0$/, '') + 'B';
+  if (p >= 1e6) return (p / 1e6).toFixed(p >= 1e8 ? 0 : 1).replace(/\.0$/, '') + 'M';
+  if (p >= 1e3) return Math.round(p / 1e3) + 'K';
+  return String(Math.round(p));
+}
+function parsePower(s) {
+  const m = String(s).trim().replace(',', '.').match(/^(\d+(?:\.\d+)?)\s*([kmb])?$/i);
+  if (!m) return null;
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+  return Math.round(parseFloat(m[1]) * mult);
+}
+
+/* ---------- plan model ---------- */
+function defaultPlan() {
+  return {
+    v: 1, name: 'Bear trap plan',
+    grid: { w: 40, h: 32, ox: 0, oy: 0 },
+    settings: { territory: false, hqT: 15, banT: 7, rings: true, ringStep: 4, gap: 0, coords: true },
+    objects: [
+      { id: 'hq', type: 'hq', x: 18, y: 2 },
+      { id: 'trap1', type: 'trap1', x: 9, y: 15, label: 'Bear Trap 1' },
+      { id: 'trap2', type: 'trap2', x: 28, y: 15, label: 'Bear Trap 2' }
+    ]
+  };
+}
+function normalize(raw) {
+  const d = defaultPlan();
+  const p = raw && typeof raw === 'object' ? raw : {};
+  const g = p.grid || {};
+  const out = {
+    v: 1,
+    name: typeof p.name === 'string' && p.name.trim() ? p.name.slice(0, 60) : d.name,
+    grid: { w: clamp(int(g.w, d.grid.w), 12, 150), h: clamp(int(g.h, d.grid.h), 12, 150), ox: int(g.ox, 0), oy: int(g.oy, 0) },
+    settings: Object.assign({}, d.settings),
+    objects: [],
+    rev: typeof p.rev === 'string' ? p.rev : undefined,
+    updatedAt: Number.isFinite(p.updatedAt) ? p.updatedAt : undefined
+  };
+  const s = p.settings || {};
+  out.settings.territory = !!s.territory;
+  out.settings.rings = s.rings === undefined ? true : !!s.rings;
+  out.settings.coords = s.coords === undefined ? true : !!s.coords;
+  out.settings.hqT = clamp(int(s.hqT, d.settings.hqT), 3, 61);
+  out.settings.banT = clamp(int(s.banT, d.settings.banT), 1, 41);
+  out.settings.ringStep = clamp(int(s.ringStep, d.settings.ringStep), 1, 20);
+  out.settings.gap = clamp(int(s.gap, 0), 0, 1);
+  const seen = {}; const ids = {};
+  for (const o of Array.isArray(p.objects) ? p.objects : []) {
+    if (!o || !SIZES[o.type]) continue;
+    if (UNIQUE[o.type]) { if (seen[o.type]) continue; seen[o.type] = true; }
+    const x = int(o.x, NaN), y = int(o.y, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    let id = typeof o.id === 'string' && o.id ? o.id.slice(0, 24) : uid();
+    if (ids[id]) id = uid();
+    ids[id] = true;
+    const n = { id, type: o.type, x, y };
+    if (o.type === 'city') {
+      n.name = typeof o.name === 'string' ? o.name.slice(0, 40) : '';
+      n.power = Number.isFinite(o.power) && o.power > 0 ? Math.round(o.power) : 0;
+      n.trap = o.trap === 1 || o.trap === 2 ? o.trap : 0;
+      n.leader = !!o.leader;
+      n.note = typeof o.note === 'string' ? o.note.slice(0, 80) : '';
+      if (o.example) n.example = true;
+    }
+    if (o.type === 'trap1' || o.type === 'trap2') n.label = typeof o.label === 'string' && o.label.trim() ? o.label.slice(0, 30) : NAMES[o.type];
+    out.objects.push(n);
+  }
+  return out;
+}
+function loadLocal() { try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ base: officialId, modified, plan })); } catch (e) { /* storage unavailable */ } }
+
+/* ---------- state ---------- */
+const EMBEDDED = {"grid": {"h": 38, "ox": 0, "oy": 0, "w": 46}, "name": "Alliance bear plan", "objects": [{"id": "hq", "type": "hq", "x": 21, "y": 2}, {"id": "trap1", "label": "Bear Trap 1", "type": "trap1", "x": 10, "y": 19}, {"id": "trap2", "label": "Bear Trap 2", "type": "trap2", "x": 33, "y": 19}, {"id": "qf5ka3r6", "leader": true, "name": "Flowjo", "note": "", "power": 85851881, "trap": 1, "type": "city", "x": 10, "y": 17}, {"id": "6bl8ynux", "leader": true, "name": "사무국장", "note": "", "power": 67280651, "trap": 2, "type": "city", "x": 33, "y": 17}, {"id": "1zyxbjb3", "leader": true, "name": "Mothman", "note": "", "power": 52310023, "trap": 2, "type": "city", "x": 31, "y": 19}, {"id": "b6m5sssv", "leader": true, "name": "Styx", "note": "", "power": 43117864, "trap": 1, "type": "city", "x": 8, "y": 19}, {"id": "nht6ix3o", "leader": true, "name": "Tyraniah", "note": "", "power": 39870795, "trap": 1, "type": "city", "x": 13, "y": 19}, {"id": "bfesbdfz", "leader": true, "name": "SupremeMaster", "note": "", "power": 39042054, "trap": 2, "type": "city", "x": 36, "y": 19}, {"id": "o3b3n3yk", "leader": true, "name": "Napoleon", "note": "", "power": 37486168, "trap": 2, "type": "city", "x": 33, "y": 22}, {"id": "b1dw0ecr", "leader": true, "name": "Meowrior", "note": "", "power": 35300772, "trap": 1, "type": "city", "x": 10, "y": 22}, {"id": "q7appwht", "leader": false, "name": "Worlord", "note": "", "power": 35227514, "trap": 1, "type": "city", "x": 12, "y": 17}, {"id": "si6u9cys", "leader": false, "name": "Nero", "note": "", "power": 33628007, "trap": 2, "type": "city", "x": 35, "y": 17}, {"id": "acksuot3", "leader": false, "name": "FIR3M4N", "note": "", "power": 33410887, "trap": 2, "type": "city", "x": 31, "y": 21}, {"id": "4wa9lvhe", "leader": false, "name": "SAQUEEN", "note": "", "power": 32980476, "trap": 1, "type": "city", "x": 8, "y": 21}, {"id": "cs1aopn8", "leader": false, "name": "Casdage", "note": "", "power": 30946493, "trap": 1, "type": "city", "x": 13, "y": 21}, {"id": "10w2f93z", "leader": false, "name": "kynim", "note": "", "power": 28903897, "trap": 2, "type": "city", "x": 36, "y": 21}, {"id": "sjnz34i0", "leader": false, "name": "Fenrir", "note": "", "power": 28852428, "trap": 2, "type": "city", "x": 31, "y": 17}, {"id": "qet74bja", "leader": false, "name": "Egomenya", "note": "", "power": 28639943, "trap": 1, "type": "city", "x": 8, "y": 17}, {"id": "o717scp0", "leader": false, "name": "alfred", "note": "", "power": 28506168, "trap": 1, "type": "city", "x": 12, "y": 23}, {"id": "2spfepk5", "leader": false, "name": "KingJosh", "note": "", "power": 25905655, "trap": 2, "type": "city", "x": 35, "y": 23}, {"id": "vwcr1z0y", "leader": false, "name": "MacedonianOP", "note": "", "power": 25586577, "trap": 2, "type": "city", "x": 37, "y": 17}, {"id": "a36w8a2s", "leader": false, "name": "Hopavol", "note": "", "power": 23563989, "trap": 1, "type": "city", "x": 14, "y": 17}, {"id": "v3ylru09", "leader": false, "name": "Odyssey", "note": "", "power": 23539514, "trap": 1, "type": "city", "x": 8, "y": 23}, {"id": "uj4dvc0m", "leader": false, "name": "Baldwin IV", "note": "", "power": 22838687, "trap": 2, "type": "city", "x": 31, "y": 23}, {"id": "1qw9qs5e", "leader": false, "name": "BayırDomuzu", "note": "", "power": 22436083, "trap": 2, "type": "city", "x": 33, "y": 15}, {"id": "wun1qvcd", "leader": false, "name": "Convile", "note": "", "power": 22419956, "trap": 1, "type": "city", "x": 10, "y": 15}, {"id": "jrdkq0ck", "leader": false, "name": "MILK", "note": "", "power": 22310825, "trap": 1, "type": "city", "x": 6, "y": 19}, {"id": "1ij6edmn", "leader": false, "name": "Srehan", "note": "", "power": 22263155, "trap": 2, "type": "city", "x": 29, "y": 19}, {"id": "06ry0dp1", "leader": false, "name": "lil cha", "note": "", "power": 22231097, "trap": 2, "type": "city", "x": 38, "y": 19}, {"id": "vpf8fmou", "leader": false, "name": "katt", "note": "", "power": 21445901, "trap": 1, "type": "city", "x": 15, "y": 19}, {"id": "znl52ujh", "leader": false, "name": "KobeBistec", "note": "", "power": 21276409, "trap": 1, "type": "city", "x": 10, "y": 24}, {"id": "rt2s2m9k", "leader": false, "name": "Von Paulus", "note": "", "power": 20975708, "trap": 2, "type": "city", "x": 33, "y": 24}, {"id": "b0ak5yu7", "leader": false, "name": "Sir Ziller", "note": "", "power": 20952060, "trap": 2, "type": "city", "x": 35, "y": 15}, {"id": "tavo0osm", "leader": false, "name": "panakeia", "note": "", "power": 20842679, "trap": 1, "type": "city", "x": 12, "y": 15}, {"id": "7ylsgw33", "leader": false, "name": "ElboSs", "note": "", "power": 20831818, "trap": 1, "type": "city", "x": 6, "y": 21}, {"id": "wsgxj0xb", "leader": false, "name": "inflexible", "note": "", "power": 20579598, "trap": 2, "type": "city", "x": 29, "y": 21}, {"id": "r1kkwt8i", "leader": false, "name": "LadyRiches", "note": "", "power": 20413627, "trap": 2, "type": "city", "x": 38, "y": 21}, {"id": "z1tee99b", "leader": false, "name": "architect61", "note": "", "power": 20309910, "trap": 1, "type": "city", "x": 15, "y": 21}, {"id": "wi6xvlki", "leader": false, "name": "Sandy", "note": "", "power": 20185299, "trap": 1, "type": "city", "x": 14, "y": 23}, {"id": "e17tsehs", "leader": false, "name": "Kain", "note": "", "power": 19962229, "trap": 2, "type": "city", "x": 37, "y": 23}, {"id": "22iltxkp", "leader": false, "name": "SerB", "note": "", "power": 19326724, "trap": 2, "type": "city", "x": 31, "y": 15}, {"id": "15v59vvm", "leader": false, "name": "SmallestOof", "note": "", "power": 19319295, "trap": 1, "type": "city", "x": 8, "y": 15}, {"id": "9f40cb1j", "leader": false, "name": "Kobochin", "note": "", "power": 19271346, "trap": 1, "type": "city", "x": 6, "y": 17}, {"id": "pgfero97", "leader": false, "name": "팡팡이", "note": "", "power": 19225832, "trap": 2, "type": "city", "x": 29, "y": 17}, {"id": "esneppes", "leader": false, "name": "Nightlord", "note": "", "power": 19130956, "trap": 2, "type": "city", "x": 37, "y": 15}, {"id": "558od6qz", "leader": false, "name": "RAJA", "note": "", "power": 19098033, "trap": 1, "type": "city", "x": 14, "y": 15}, {"id": "bkzxd251", "leader": false, "name": "Kamandanu", "note": "", "power": 18846126, "trap": 1, "type": "city", "x": 6, "y": 23}, {"id": "3di9wbfv", "leader": false, "name": "Distinct", "note": "", "power": 18830642, "trap": 2, "type": "city", "x": 29, "y": 23}, {"id": "rmmkdvex", "leader": false, "name": "코리아월드", "note": "", "power": 18825282, "trap": 2, "type": "city", "x": 35, "y": 25}, {"id": "wwzqkvq6", "leader": false, "name": "Acidvisor", "note": "", "power": 18802981, "trap": 1, "type": "city", "x": 12, "y": 25}, {"id": "ro4lngjx", "leader": false, "name": "Adamant", "note": "", "power": 18796509, "trap": 1, "type": "city", "x": 16, "y": 17}, {"id": "cmys4oe6", "leader": false, "name": "plaguedfw", "note": "", "power": 18734172, "trap": 2, "type": "city", "x": 39, "y": 17}, {"id": "gvs7e5ru", "leader": false, "name": "Meuhug", "note": "", "power": 18677096, "trap": 2, "type": "city", "x": 31, "y": 25}, {"id": "xja6hccp", "leader": false, "name": "Dcurbe", "note": "", "power": 18650668, "trap": 1, "type": "city", "x": 8, "y": 25}, {"id": "lcyelswg", "leader": false, "name": "SuperPotato", "note": "", "power": 18552976, "trap": 1, "type": "city", "x": 6, "y": 15}, {"id": "0wewhakf", "leader": false, "name": "mew3t", "note": "", "power": 18511599, "trap": 2, "type": "city", "x": 29, "y": 15}, {"id": "twobv0ps", "leader": false, "name": "Legenta", "note": "", "power": 18389297, "trap": 2, "type": "city", "x": 33, "y": 13}, {"id": "mxny6qq7", "leader": false, "name": "SuperSloyo", "note": "", "power": 18314184, "trap": 1, "type": "city", "x": 10, "y": 13}, {"id": "z1sx4i63", "leader": false, "name": "Uchiha", "note": "", "power": 18188533, "trap": 1, "type": "city", "x": 4, "y": 19}, {"id": "358ddhys", "leader": false, "name": "Pepsi The Fury", "note": "", "power": 18124860, "trap": 2, "type": "city", "x": 27, "y": 19}, {"id": "9lyznfet", "leader": false, "name": "GGHOSTT", "note": "", "power": 18057635, "trap": 2, "type": "city", "x": 40, "y": 19}, {"id": "r1txzphx", "leader": false, "name": "RaiderX", "note": "", "power": 17915575, "trap": 1, "type": "city", "x": 17, "y": 19}, {"id": "3z4mj81b", "leader": false, "name": "Van", "note": "", "power": 17627271, "trap": 1, "type": "city", "x": 16, "y": 23}, {"id": "7tobbey9", "leader": false, "name": "Alimali5", "note": "", "power": 17627123, "trap": 2, "type": "city", "x": 39, "y": 23}, {"id": "e3b1enbo", "leader": false, "name": "Catar", "note": "", "power": 17600112, "trap": 2, "type": "city", "x": 37, "y": 25}, {"id": "ikmcwsdd", "leader": false, "name": "Cal the Rare", "note": "", "power": 17530187, "trap": 1, "type": "city", "x": 14, "y": 25}, {"id": "msig33tp", "leader": false, "name": "Zenith", "note": "", "power": 17477489, "trap": 1, "type": "city", "x": 10, "y": 26}, {"id": "ui0bfi88", "leader": false, "name": "Arthur", "note": "", "power": 17450874, "trap": 2, "type": "city", "x": 33, "y": 26}, {"id": "kun1th1q", "leader": false, "name": "Scrubber", "note": "", "power": 17448230, "trap": 2, "type": "city", "x": 35, "y": 13}, {"id": "cfn156nd", "leader": false, "name": "KingKillerZ1308", "note": "", "power": 17325873, "trap": 1, "type": "city", "x": 12, "y": 13}, {"id": "llbticoj", "leader": false, "name": "Safraporte", "note": "", "power": 17288983, "trap": 1, "type": "city", "x": 4, "y": 21}, {"id": "kmkcw6to", "leader": false, "name": "RenibOy", "note": "", "power": 17128975, "trap": 2, "type": "city", "x": 27, "y": 21}, {"id": "wje8na69", "leader": false, "name": "Uğur", "note": "", "power": 16922129, "trap": 2, "type": "city", "x": 40, "y": 21}, {"id": "rrc43h4d", "leader": false, "name": "Kalikko", "note": "", "power": 16816479, "trap": 1, "type": "city", "x": 17, "y": 21}, {"id": "e4gg2wrb", "leader": false, "name": "NeW", "note": "", "power": 16720465, "trap": 1, "type": "city", "x": 8, "y": 13}, {"id": "gyfvgvnz", "leader": false, "name": "吴迪WD", "note": "", "power": 16710566, "trap": 2, "type": "city", "x": 31, "y": 13}, {"id": "mk1dxdjp", "leader": false, "name": "NarcotiquE", "note": "", "power": 16671061, "trap": 2, "type": "city", "x": 27, "y": 17}, {"id": "sz4adhqm", "leader": false, "name": "Εις την Πουτσα μ", "note": "", "power": 16641665, "trap": 1, "type": "city", "x": 4, "y": 17}, {"id": "tpx2a09l", "leader": false, "name": "Simbaz", "note": "", "power": 16477255, "trap": 1, "type": "city", "x": 16, "y": 15}, {"id": "l1d1kc1j", "leader": false, "name": "Scotsman", "note": "", "power": 16345461, "trap": 2, "type": "city", "x": 39, "y": 15}, {"id": "p35nymnx", "leader": false, "name": "A7madM7madd", "note": "", "power": 16317694, "trap": 2, "type": "city", "x": 29, "y": 25}, {"id": "n2azs866", "leader": false, "name": "AhmedKhGhanem", "note": "", "power": 16241535, "trap": 1, "type": "city", "x": 6, "y": 25}, {"id": "zz7s8j35", "leader": false, "name": "Bobo Dupla", "note": "", "power": 16230780, "trap": 1, "type": "city", "x": 14, "y": 13}, {"id": "rub1f91u", "leader": false, "name": "Chiu", "note": "", "power": 16202618, "trap": 2, "type": "city", "x": 37, "y": 13}, {"id": "w4dw3g2e", "leader": false, "name": "Bellessa", "note": "", "power": 16101146, "trap": 2, "type": "city", "x": 27, "y": 23}, {"id": "364z2yd3", "leader": false, "name": "mr 123", "note": "", "power": 15936059, "trap": 1, "type": "city", "x": 4, "y": 23}, {"id": "oe8m0sdl", "leader": false, "name": "h4ck3r", "note": "", "power": 15873854, "trap": 1, "type": "city", "x": 12, "y": 27}, {"id": "1pcrmlab", "leader": false, "name": "Dirplava", "note": "", "power": 15334211, "trap": 2, "type": "city", "x": 35, "y": 27}, {"id": "5hkxpre7", "leader": false, "name": "shitbread", "note": "", "power": 15267304, "trap": 2, "type": "city", "x": 39, "y": 25}, {"id": "k4tcesuj", "leader": false, "name": "Vitan", "note": "", "power": 15108635, "trap": 1, "type": "city", "x": 16, "y": 25}, {"id": "qwx4465f", "leader": false, "name": "Dpapi", "note": "", "power": 15007075, "trap": 1, "type": "city", "x": 6, "y": 13}, {"id": "qjlz5hy9", "leader": false, "name": "SASUKE", "note": "", "power": 14972627, "trap": 2, "type": "city", "x": 29, "y": 13}, {"id": "e2uhjxce", "leader": false, "name": "Repiller", "note": "", "power": 14927747, "trap": 2, "type": "city", "x": 27, "y": 15}, {"id": "wlmjddum", "leader": false, "name": "droolrboy69", "note": "", "power": 14743737, "trap": 1, "type": "city", "x": 4, "y": 15}, {"id": "ytnvltlk", "leader": false, "name": "Celago", "note": "", "power": 14676593, "trap": 1, "type": "city", "x": 18, "y": 17}, {"id": "y87z5f9e", "leader": false, "name": "MeteHan", "note": "", "power": 14444620, "trap": 2, "type": "city", "x": 41, "y": 17}, {"id": "fsn9ap5c", "leader": false, "name": "Wanderer", "note": "", "power": 13730568, "trap": 2, "type": "city", "x": 31, "y": 27}, {"id": "a3igidz9", "leader": false, "name": "Charly land NL", "note": "", "power": 13128139, "trap": 1, "type": "city", "x": 8, "y": 27}, {"id": "z7dqxfso", "leader": false, "name": "justftae", "note": "", "power": 12996925, "trap": 1, "type": "city", "x": 18, "y": 23}, {"id": "955eq4d7", "leader": false, "name": "Pure", "note": "", "power": 11483478, "trap": 2, "type": "city", "x": 41, "y": 23}, {"id": "549n2nqx", "leader": false, "name": "Airdronian", "note": "", "power": 11205163, "trap": 2, "type": "city", "x": 37, "y": 27}], "settings": {"banT": 7, "coords": true, "gap": 0, "hqT": 15, "ringStep": 4, "rings": true, "territory": false}, "updatedAt": 1792782796816, "v": 1};
+let official = normalize(EMBEDDED);
+let officialId = String(official.updatedAt || 0);
+let plan = (() => { const l = loadLocal(); return l && l.base === officialId && l.plan ? normalize(l.plan) : normalize(EMBEDDED); })();
+let modified = (() => { const l = loadLocal(); return !!(l && l.base === officialId && l.modified); })();
+let sel = null, tool = 'select', readOnly = false, tab = 'mem';
+let view = { s: 20, ox: 0, oy: 0 };
+let ghost = null, preview = null, onboardDismissed = false, memberQuery = '';
+const undoStack = [], redoStack = [];
+
+function mutate(fn) {
+  if (readOnly) return;
+  undoStack.push(JSON.stringify(plan));
+  if (undoStack.length > 80) undoStack.shift();
+  redoStack.length = 0;
+  fn(plan);
+  changed();
+}
+function changed() { plan.updatedAt = Date.now(); modified = true; showOfficial(); saveLocal(); scheduleSync(); refreshUI(); requestRender(); }
+function undo() { if (readOnly || !undoStack.length) return; redoStack.push(JSON.stringify(plan)); plan = normalize(JSON.parse(undoStack.pop())); fixSel(); changed(); }
+function redo() { if (readOnly || !redoStack.length) return; undoStack.push(JSON.stringify(plan)); plan = normalize(JSON.parse(redoStack.pop())); fixSel(); changed(); }
+function fixSel() { if (sel && !plan.objects.some((o) => o.id === sel)) sel = null; }
+
+/* ---------- geometry ---------- */
+const sz = (o) => SIZES[o.type];
+const centerOf = (o, x = o.x, y = o.y) => ({ x: x + sz(o) / 2, y: y + sz(o) / 2 });
+const byId = (id) => plan.objects.find((o) => o.id === id);
+const trapObj = (n, P = plan) => P.objects.find((o) => o.type === 'trap' + n) || null;
+function nearestTrap(c, P = plan) {
+  let best = null, bd = Infinity;
+  for (const t of [trapObj(1, P), trapObj(2, P)]) {
+    if (!t) continue;
+    const d = dist(c, t);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+function dist(a, b) { const p = centerOf(a), q = centerOf(b); return Math.hypot(p.x - q.x, p.y - q.y); }
+function cityTrap(c, P = plan) { return c.trap ? trapObj(c.trap, P) : nearestTrap(c, P); }
+function occGrid(P, excludeId) {
+  const { w, h } = P.grid; const g = new Uint8Array(w * h);
+  for (const o of P.objects) {
+    if (o.id === excludeId) continue;
+    const s = sz(o);
+    for (let y = Math.max(0, o.y); y < Math.min(h, o.y + s); y++)
+      for (let x = Math.max(0, o.x); x < Math.min(w, o.x + s); x++) g[y * w + x] = 1;
+  }
+  return g;
+}
+function fits(P, g, x, y, s, gap = 0) {
+  const { w, h } = P.grid;
+  if (x < 0 || y < 0 || x + s > w || y + s > h) return false;
+  for (let yy = y - gap; yy < y + s + gap; yy++) {
+    if (yy < 0 || yy >= h) continue;
+    for (let xx = x - gap; xx < x + s + gap; xx++) {
+      if (xx < 0 || xx >= w) continue;
+      if (g[yy * w + xx]) return false;
+    }
+  }
+  return true;
+}
+function coverage(P) {
+  const { w, h } = P.grid; const c = new Uint8Array(w * h);
+  for (const o of P.objects) {
+    if (o.type !== 'hq' && o.type !== 'banner') continue;
+    const T = o.type === 'hq' ? P.settings.hqT : P.settings.banT;
+    const ct = centerOf(o);
+    const x0 = Math.round(ct.x - T / 2), y0 = Math.round(ct.y - T / 2);
+    for (let y = Math.max(0, y0); y < Math.min(h, y0 + T); y++)
+      for (let x = Math.max(0, x0); x < Math.min(w, x0 + T); x++) c[y * w + x] = 1;
+  }
+  return c;
+}
+function insideCov(P, cov, x, y, s) {
+  const w = P.grid.w;
+  for (let yy = y; yy < y + s; yy++) for (let xx = x; xx < x + s; xx++) if (!cov[yy * w + xx]) return false;
+  return true;
+}
+function hitTest(tx, ty) {
+  for (let i = ORDER.length - 1; i >= 0; i--) {
+    const list = plan.objects.filter((o) => o.type === ORDER[i]);
+    for (let j = list.length - 1; j >= 0; j--) {
+      const o = list[j], s = sz(o);
+      if (tx >= o.x && tx < o.x + s && ty >= o.y && ty < o.y + s) return o;
+    }
+  }
+  return null;
+}
+
+/* ---------- auto placement ---------- */
+function sortMembers(list) {
+  return list.slice().sort((a, b) => (b.leader - a.leader) || ((b.power || 0) - (a.power || 0)));
+}
+function autoPlace(P, members, gap) {
+  const g = occGrid(P, null);
+  const cov = P.settings.territory ? coverage(P) : null;
+  const { w, h } = P.grid;
+  const placed = [], failed = [];
+  for (const m of members) {
+    const t = m.target ? trapObj(m.target, P) : null;
+    const tc = t ? centerOf(t) : { x: w / 2, y: h / 2 };
+    let best = null, bd = Infinity;
+    for (let y = 0; y <= h - 2; y++) {
+      for (let x = 0; x <= w - 2; x++) {
+        if (!fits(P, g, x, y, 2, gap)) continue;
+        let d = Math.hypot(x + 1 - tc.x, y + 1 - tc.y);
+        if (cov && !insideCov(P, cov, x, y, 2)) d += 1000;
+        if (d < bd - 1e-9) { bd = d; best = { x, y }; }
+      }
+    }
+    if (!best) { failed.push(m); continue; }
+    for (let yy = best.y; yy < best.y + 2; yy++) for (let xx = best.x; xx < best.x + 2; xx++) g[yy * w + xx] = 1;
+    const c = { id: m.id || uid(), type: 'city', x: best.x, y: best.y, name: m.name || '', power: m.power || 0, trap: m.trap || 0, leader: !!m.leader, note: m.note || '' };
+    if (m.example) c.example = true;
+    P.objects.push(c); placed.push(c);
+  }
+  return { placed, failed };
+}
+function assignTraps(sorted, split) {
+  const pattern = [1, 2, 2, 1];
+  let i = 0;
+  for (const m of sorted) {
+    if (m.trap === 1 || m.trap === 2) { m.target = m.trap; continue; }
+    if (split === '1' || split === '2') { m.trap = +split; m.target = m.trap; continue; }
+    if (split === 'even') { m.trap = pattern[i++ % 4]; m.target = m.trap; continue; }
+    m.trap = 0; m.target = 0;
+  }
+}
+function parseMembers(text) {
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.split(/[,;\t|]/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) continue;
+    const m = { name: parts[0].slice(0, 40), power: 0, trap: 0, leader: false };
+    for (const p of parts.slice(1)) {
+      if (/^(l|rl|lead|leader|host)$/i.test(p)) { m.leader = true; continue; }
+      if (/^(t|trap)?\s*[12]$/i.test(p)) { m.trap = +p.slice(-1); continue; }
+      const pw = parsePower(p);
+      if (pw !== null) { m.power = pw; continue; }
+    }
+    out.push(m);
+  }
+  return out;
+}
+function placeMembers(members, split, strongest, replace) {
+  let result = null;
+  mutate((P) => {
+    if (replace) P.objects = P.objects.filter((o) => o.type !== 'city');
+    let list = strongest ? sortMembers(members) : members.slice();
+    assignTraps(list, split);
+    if (split === '0') for (const m of list) { m.target = 0; }
+    if (split === '0') {
+      // nearest trap: target whichever trap has fewer cities so far, keep group empty
+      let c1 = 0, c2 = 0;
+      for (const m of list) { if (trapObj(1, P) && (!trapObj(2, P) || c1 <= c2)) { m.target = 1; c1++; } else if (trapObj(2, P)) { m.target = 2; c2++; } }
+    }
+    result = autoPlace(P, list, P.settings.gap);
+  });
+  return result;
+}
+function repack() {
+  const cities = plan.objects.filter((o) => o.type === 'city');
+  if (!cities.length) { toast('There are no cities to re-pack yet.'); return; }
+  let res = null;
+  mutate((P) => {
+    const list = sortMembers(cities.map((c) => {
+      const t = cityTrap(c, P);
+      return Object.assign({}, c, { target: c.trap || (t ? (t.type === 'trap1' ? 1 : 2) : 0) });
+    }));
+    P.objects = P.objects.filter((o) => o.type !== 'city');
+    res = autoPlace(P, list, P.settings.gap);
+  });
+  toast(res && res.failed.length ? `${res.failed.length} cities didn't fit. Make the map bigger.` : 'Cities re-packed around their traps. Undo to go back.');
+}
+function exampleMembers() {
+  const list = [];
+  for (let i = 0; i < 24; i++) {
+    const power = Math.round((74 - i * 2.7 - (i % 3) * 0.6) * 1e6);
+    list.push({ name: 'Example ' + String(i + 1).padStart(2, '0'), power, leader: i < 3, trap: 0, example: true });
+  }
+  return list;
+}
+
+/* ---------- palette ---------- */
+let pal = null;
+function readPal() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = (n) => cs.getPropertyValue(n).trim();
+  pal = {
+    outside: g('--outside'), ground: g('--ground'), grid: g('--grid'), gridMajor: g('--grid-major'),
+    t1: g('--t1'), t1Soft: g('--t1-soft'), t1Ink: g('--t1-ink'), t2: g('--t2'), t2Soft: g('--t2-soft'), t2Ink: g('--t2-ink'),
+    city: g('--city'), citySoft: g('--city-soft'), cityInk: g('--city-ink'), hq: g('--hq'), hqInk: g('--hq-ink'),
+    banner: g('--banner'), block: g('--block'), terr: g('--terr'), terrLine: g('--terr-line'),
+    danger: g('--danger'), ok: g('--ok'), focus: g('--focus'), muted: g('--muted'), ink: g('--ink'), surface: g('--surface')
+  };
+}
+const PRINT = {
+  outside: '#D9DED4', ground: '#EEF2E8', grid: 'rgba(23,32,51,.08)', gridMajor: 'rgba(23,32,51,.2)',
+  t1: '#C98A1E', t1Soft: '#F7E6C4', t1Ink: '#5E3E06', t2: '#2C7FB0', t2Soft: '#D5E9F5', t2Ink: '#103A55',
+  city: '#8790A3', citySoft: '#FFFFFF', cityInk: '#252D40', hq: '#1B2338', hqInk: '#F3D58E',
+  banner: '#6B4FA0', block: '#A3AAA2', terr: 'rgba(44,127,176,.12)', terrLine: 'rgba(44,127,176,.65)',
+  danger: '#C2412F', ok: '#2F8A57', focus: '#C98E22', muted: '#5A6377', ink: '#172033', surface: '#FFFFFF'
+};
+const FONT_HEAD = '"Barlow Condensed", "Arial Narrow", sans-serif';
+const FONT_UI = '"Barlow", system-ui, sans-serif';
+
+/* ---------- drawing ---------- */
+function rr(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function paw(ctx, cx, cy, r) {
+  ctx.beginPath(); ctx.ellipse(cx, cy + r * 0.28, r * 0.52, r * 0.44, 0, 0, Math.PI * 2); ctx.fill();
+  const toes = [[-0.62, -0.28], [-0.22, -0.62], [0.22, -0.62], [0.62, -0.28]];
+  for (const [dx, dy] of toes) { ctx.beginPath(); ctx.ellipse(cx + dx * r, cy + dy * r, r * 0.19, r * 0.25, 0, 0, Math.PI * 2); ctx.fill(); }
+}
+function star(ctx, cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rad = i % 2 ? r * 0.45 : r;
+    const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function fitText(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t.length > 1 ? t + '…' : '';
+}
+function haloText(ctx, text, x, y, fill, halo, lw) {
+  ctx.lineJoin = 'round'; ctx.lineWidth = lw; ctx.strokeStyle = halo; ctx.strokeText(text, x, y);
+  ctx.fillStyle = fill; ctx.fillText(text, x, y);
+}
+function trapColors(n, P) { return n === 1 ? [P.t1, P.t1Soft, P.t1Ink] : n === 2 ? [P.t2, P.t2Soft, P.t2Ink] : [P.city, P.citySoft, P.cityInk]; }
+
+function drawScene(ctx, o) {
+  const P = o.plan, C = o.pal, s = o.s, ox = o.ox, oy = o.oy, G = P.grid, st = P.settings, ex = !!o.exportMode;
+  const X = (x) => ox + x * s, Y = (y) => oy + y * s;
+  ctx.save();
+  ctx.fillStyle = C.outside; ctx.fillRect(0, 0, o.W, o.H);
+  ctx.fillStyle = C.ground; ctx.fillRect(X(0), Y(0), G.w * s, G.h * s);
+  const vx0 = Math.max(0, Math.floor(-ox / s)), vx1 = Math.min(G.w, Math.ceil((o.W - ox) / s));
+  const vy0 = Math.max(0, Math.floor(-oy / s)), vy1 = Math.min(G.h, Math.ceil((o.H - oy) / s));
+
+  const cov = st.territory ? coverage(P) : null;
+  if (cov) {
+    const has = (x, y) => x >= 0 && y >= 0 && x < G.w && y < G.h && cov[y * G.w + x];
+    ctx.fillStyle = C.terr;
+    for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) if (cov[y * G.w + x]) ctx.fillRect(X(x), Y(y), s + 0.6, s + 0.6);
+    ctx.beginPath();
+    for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
+      if (!cov[y * G.w + x]) continue;
+      if (!has(x, y - 1)) { ctx.moveTo(X(x), Y(y)); ctx.lineTo(X(x + 1), Y(y)); }
+      if (!has(x, y + 1)) { ctx.moveTo(X(x), Y(y + 1)); ctx.lineTo(X(x + 1), Y(y + 1)); }
+      if (!has(x - 1, y)) { ctx.moveTo(X(x), Y(y)); ctx.lineTo(X(x), Y(y + 1)); }
+      if (!has(x + 1, y)) { ctx.moveTo(X(x + 1), Y(y)); ctx.lineTo(X(x + 1), Y(y + 1)); }
+    }
+    ctx.strokeStyle = C.terrLine; ctx.lineWidth = Math.max(1.2, s * 0.08); ctx.stroke();
+  }
+
+  if (s >= 5) {
+    for (const major of [false, true]) {
+      ctx.beginPath();
+      for (let x = vx0; x <= vx1; x++) { if ((x % 5 === 0) !== major) continue; ctx.moveTo(X(x), Y(vy0)); ctx.lineTo(X(x), Y(vy1)); }
+      for (let y = vy0; y <= vy1; y++) { if ((y % 5 === 0) !== major) continue; ctx.moveTo(X(vx0), Y(y)); ctx.lineTo(X(vx1), Y(y)); }
+      ctx.strokeStyle = major ? C.gridMajor : C.grid; ctx.lineWidth = ex ? Math.max(1, s * 0.03) : 1; ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = C.gridMajor; ctx.lineWidth = ex ? 3 : 1.5; ctx.strokeRect(X(0), Y(0), G.w * s, G.h * s);
+
+  // distance rings
+  if (st.rings) {
+    for (const n of [1, 2]) {
+      const t = trapObj(n, P); if (!t) continue;
+      const pos = o.preview && o.preview.id === t.id ? o.preview : t;
+      const c = centerOf(t, pos.x, pos.y);
+      const col = n === 1 ? C.t1 : C.t2;
+      for (let k = 1; k <= 3; k++) {
+        const r = k * st.ringStep * s;
+        ctx.save();
+        ctx.globalAlpha = 0.55; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, s * 0.07);
+        ctx.setLineDash([Math.max(4, s * 0.45), Math.max(3, s * 0.3)]);
+        ctx.beginPath(); ctx.arc(X(c.x), Y(c.y), r, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+        if (s >= 7) {
+          const fs = ex ? s * 0.42 : clamp(s * 0.5, 9, 12);
+          ctx.font = `700 ${fs}px ${FONT_HEAD}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          haloText(ctx, `${k * st.ringStep}`, X(c.x), Y(c.y) - r, col, C.ground, fs * 0.35);
+        }
+      }
+    }
+  }
+
+  // objects
+  for (const type of ORDER) {
+    for (const ob of P.objects) {
+      if (ob.type !== type) continue;
+      const pv = o.preview && o.preview.id === ob.id ? o.preview : null;
+      drawObject(ctx, ob, pv ? pv.x : ob.x, pv ? pv.y : ob.y, o, X, Y, cov, pv);
+    }
+  }
+
+  // selection
+  if (o.sel) {
+    const so = P.objects.find((q) => q.id === o.sel);
+    if (so) {
+      const pv = o.preview && o.preview.id === so.id ? o.preview : so;
+      const n = sz(so);
+      ctx.save(); ctx.strokeStyle = C.focus; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]);
+      ctx.strokeRect(X(pv.x) - 3, Y(pv.y) - 3, n * s + 6, n * s + 6); ctx.restore();
+    }
+  }
+  // ghost
+  if (o.ghost) {
+    const gh = o.ghost;
+    ctx.save(); ctx.globalAlpha = 0.32; ctx.fillStyle = gh.valid ? C.ok : C.danger;
+    ctx.fillRect(X(gh.x), Y(gh.y), gh.size * s, gh.size * s);
+    ctx.globalAlpha = 1; ctx.strokeStyle = gh.valid ? C.ok : C.danger; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.strokeRect(X(gh.x), Y(gh.y), gh.size * s, gh.size * s); ctx.restore();
+  }
+  // coordinate labels on screen edges
+  if (st.coords && !ex && s >= 8) {
+    const fs = 11;
+    ctx.font = `600 ${fs}px ${FONT_UI}`; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    const top = Math.max(Y(0), 0) + 3, left = Math.max(X(0), 0) + 3;
+    for (let x = Math.ceil(vx0 / 5) * 5; x < vx1; x += 5) if (X(x) > left + 18) haloText(ctx, String(G.ox + x), X(x) + 2, top, C.muted, C.ground, 3);
+    for (let y = Math.ceil(vy0 / 5) * 5; y < vy1; y += 5) if (Y(y) > top + 14) haloText(ctx, String(G.oy + y), left, Y(y) + 2, C.muted, C.ground, 3);
+  }
+  ctx.restore();
+}
+
+function drawObject(ctx, ob, x, y, o, X, Y, cov, pv) {
+  const C = o.pal, s = o.s, ex = !!o.exportMode, n = sz(ob), P = o.plan;
+  const px = X(x), py = Y(y), w = n * s;
+  if (pv && !pv.valid) ctx.globalAlpha = 0.55;
+  if (ob.type === 'block') {
+    ctx.fillStyle = C.block; ctx.fillRect(px, py, w, w);
+    ctx.save(); ctx.beginPath(); ctx.rect(px, py, w, w); ctx.clip();
+    ctx.strokeStyle = C.ground; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1, s * 0.08);
+    ctx.beginPath(); for (let k = -w; k < w; k += Math.max(4, s * 0.35)) { ctx.moveTo(px + k, py + w); ctx.lineTo(px + k + w, py); } ctx.stroke();
+    ctx.restore();
+  } else if (ob.type === 'banner') {
+    ctx.strokeStyle = C.banner; ctx.fillStyle = C.banner; ctx.lineWidth = Math.max(1.5, s * 0.1); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(px + w * 0.28, py + w * 0.88); ctx.lineTo(px + w * 0.28, py + w * 0.12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px + w * 0.3, py + w * 0.14); ctx.lineTo(px + w * 0.86, py + w * 0.3); ctx.lineTo(px + w * 0.3, py + w * 0.52); ctx.closePath(); ctx.fill();
+  } else if (ob.type === 'hq') {
+    const pad = Math.max(1, s * 0.08);
+    rr(ctx, px + pad, py + pad, w - 2 * pad, w - 2 * pad, Math.max(3, s * 0.3)); ctx.fillStyle = C.hq; ctx.fill();
+    ctx.strokeStyle = C.hqInk; ctx.lineWidth = Math.max(1, s * 0.07); ctx.stroke();
+    if (s >= 6) {
+      ctx.fillStyle = C.hqInk; ctx.font = `700 ${s * 1.05}px ${FONT_HEAD}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('HQ', px + w / 2, py + w / 2 + s * 0.05);
+    }
+  } else if (ob.type === 'trap1' || ob.type === 'trap2') {
+    const k = ob.type === 'trap1' ? 1 : 2; const [main, soft] = trapColors(k, C);
+    const pad = Math.max(1, s * 0.08);
+    rr(ctx, px + pad, py + pad, w - 2 * pad, w - 2 * pad, Math.max(3, s * 0.35)); ctx.fillStyle = main; ctx.fill();
+    const showLabel = s >= 10;
+    ctx.fillStyle = soft; paw(ctx, px + w / 2, py + w / 2 - (showLabel ? w * 0.1 : 0), w * (showLabel ? 0.27 : 0.34));
+    if (showLabel) {
+      let fs = w * 0.17;
+      ctx.font = `700 ${fs}px ${FONT_HEAD}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = soft;
+      const lab = ob.label || NAMES[ob.type];
+      const maxW = w - 2 * pad - s * 0.3, tw = ctx.measureText(lab).width;
+      if (tw > maxW) { fs = Math.max(fs * 0.7, fs * maxW / tw); ctx.font = `700 ${fs}px ${FONT_HEAD}`; }
+      ctx.fillText(fitText(ctx, lab, maxW), px + w / 2, py + w * 0.8);
+    }
+  } else if (ob.type === 'city') {
+    const [main, soft, ink] = trapColors(ob.trap, C);
+    const pad = Math.max(1, s * 0.07);
+    const bx = px + pad, by = py + pad, bw = w - 2 * pad;
+    rr(ctx, bx, by, bw, bw, Math.max(2, s * 0.22)); ctx.fillStyle = soft; ctx.fill();
+    const outside = cov && !insideCov(P, cov, x, y, 2);
+    ctx.lineWidth = Math.max(1.2, s * 0.09); ctx.strokeStyle = outside ? C.danger : main;
+    if (outside) ctx.setLineDash([Math.max(3, s * 0.25), Math.max(2, s * 0.15)]);
+    ctx.stroke(); ctx.setLineDash([]);
+    if (ob.leader) { ctx.fillStyle = C.focus; star(ctx, bx + s * 0.34, by + s * 0.34, Math.max(3, s * 0.24)); }
+    if (outside) { ctx.fillStyle = C.danger; ctx.beginPath(); ctx.arc(bx + bw - s * 0.3, by + s * 0.3, Math.max(2.5, s * 0.16), 0, Math.PI * 2); ctx.fill(); }
+    if (s >= 9) {
+      let fs = ex ? s * 0.38 : clamp(s * 0.4, 9, 14);
+      ctx.font = `600 ${fs}px ${FONT_HEAD}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = ink;
+      const maxW = bw - s * 0.2, nm = ob.name || 'City', tw = ctx.measureText(nm).width;
+      if (tw > maxW) { fs = Math.max(fs * 0.68, fs * maxW / tw); ctx.font = `600 ${fs}px ${FONT_HEAD}`; }
+      const label = fitText(ctx, nm, maxW);
+      const showPower = ob.power && (ex ? s >= 14 : s >= 20);
+      ctx.fillText(label, px + w / 2, py + w / 2 - (showPower ? fs * 0.45 : 0));
+      if (showPower) {
+        ctx.font = `500 ${fs * 0.82}px ${FONT_HEAD}`; ctx.globalAlpha = (pv && !pv.valid) ? 0.4 : 0.75;
+        ctx.fillText(fmtPower(ob.power), px + w / 2, py + w / 2 + fs * 0.62); ctx.globalAlpha = (pv && !pv.valid) ? 0.55 : 1;
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- canvas + view ---------- */
+const stage = $('#stage'), cv = $('#map'), ctx = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1, raf = 0, fitted = false;
+function resize() {
+  const r = stage.getBoundingClientRect();
+  dpr = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height;
+  cv.width = Math.max(1, Math.round(W * dpr)); cv.height = Math.max(1, Math.round(H * dpr));
+  if (!fitted && W > 0 && H > 0) { fitView(); fitted = true; }
+  requestRender();
+}
+function requestRender() {
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0; if (!pal) readPal();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawScene(ctx, { W, H, s: view.s, ox: view.ox, oy: view.oy, pal, plan, sel, ghost, preview });
+  });
+}
+function contentBox(P, margin) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const o of P.objects) { const s = sz(o); x0 = Math.min(x0, o.x); y0 = Math.min(y0, o.y); x1 = Math.max(x1, o.x + s); y1 = Math.max(y1, o.y + s); }
+  if (!Number.isFinite(x0)) return { x: 0, y: 0, w: P.grid.w, h: P.grid.h };
+  if (P.settings.rings) {
+    for (const n of [1, 2]) { const t = trapObj(n, P); if (!t) continue; const c = centerOf(t), r = P.settings.ringStep * 3; x0 = Math.min(x0, c.x - r); y0 = Math.min(y0, c.y - r); x1 = Math.max(x1, c.x + r); y1 = Math.max(y1, c.y + r); }
+  }
+  x0 = Math.max(0, Math.floor(x0 - margin)); y0 = Math.max(0, Math.floor(y0 - margin));
+  x1 = Math.min(P.grid.w, Math.ceil(x1 + margin)); y1 = Math.min(P.grid.h, Math.ceil(y1 + margin));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+function fitView() {
+  if (!W || !H) return;
+  const b = { x: 0, y: 0, w: plan.grid.w, h: plan.grid.h };
+  const s = clamp(Math.min((W - 24) / b.w, (H - 24) / b.h), 4, 60);
+  view = { s, ox: (W - b.w * s) / 2 - b.x * s, oy: (H - b.h * s) / 2 - b.y * s };
+  requestRender();
+}
+function zoomAt(f, cx, cy) {
+  const s2 = clamp(view.s * f, 4, 80); const k = s2 / view.s;
+  view = { s: s2, ox: cx - (cx - view.ox) * k, oy: cy - (cy - view.oy) * k };
+  requestRender();
+}
+function evPos(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function toTileF(p) { return { x: (p.x - view.ox) / view.s, y: (p.y - view.oy) / view.s }; }
+
+/* ---------- pointer interaction ---------- */
+const ptrs = new Map(); let gest = null;
+function placeTarget(type, f) { const n = SIZES[type]; return { x: Math.round(f.x - n / 2), y: Math.round(f.y - n / 2), size: n }; }
+function validAt(type, x, y, excludeId) { const n = SIZES[type]; return fits(plan, occGrid(plan, excludeId), x, y, n, 0); }
+function placingGhost(f) {
+  if (readOnly || tool === 'select' || tool === 'erase') return null;
+  const t = placeTarget(tool, f); const ex = UNIQUE[tool] ? (trapObjOrHq(tool) || {}).id : null;
+  return { x: t.x, y: t.y, size: t.size, valid: validAt(tool, t.x, t.y, ex) };
+}
+function trapObjOrHq(type) { return plan.objects.find((o) => o.type === type) || null; }
+function placeAt(f) {
+  const t = placeTarget(tool, f); const existing = UNIQUE[tool] ? trapObjOrHq(tool) : null;
+  if (!validAt(tool, t.x, t.y, existing ? existing.id : null)) { toast('That spot is taken or off the map.'); return; }
+  if (existing) { mutate(() => { existing.x = t.x; existing.y = t.y; }); sel = existing.id; refreshUI(); return; }
+  const o = { id: uid(), type: tool, x: t.x, y: t.y };
+  if (tool === 'city') {
+    const n = plan.objects.filter((q) => q.type === 'city').length + 1;
+    Object.assign(o, { name: 'City ' + n, power: 0, trap: 0, leader: false, note: '' });
+    const nt = nearestTrap(o); if (nt) o.trap = nt.type === 'trap1' ? 1 : 2;
+  }
+  if (tool === 'trap1' || tool === 'trap2') o.label = NAMES[tool];
+  mutate((P) => P.objects.push(o));
+  if (tool === 'city') { sel = o.id; refreshUI(); }
+}
+cv.addEventListener('pointerdown', (e) => {
+  cv.focus({ preventScroll: true });
+  const p = evPos(e); ptrs.set(e.pointerId, p);
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    preview = null;
+    gest = { type: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), s: view.s, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, ox: view.ox, oy: view.oy };
+    requestRender(); return;
+  }
+  if (ptrs.size > 2) return;
+  const f = toTileF(p); const hit = hitTest(Math.floor(f.x), Math.floor(f.y));
+  if (tool === 'select') {
+    if (hit) {
+      selectObj(hit.id);
+      gest = readOnly ? { type: 'pan', start: p, ox: view.ox, oy: view.oy, moved: false, hit: true }
+        : { type: 'drag', id: hit.id, dx: f.x - hit.x, dy: f.y - hit.y, start: p, moved: false };
+    } else gest = { type: 'pan', start: p, ox: view.ox, oy: view.oy, moved: false, hit: false };
+  } else if (tool === 'erase') {
+    gest = { type: 'erase', start: p, ox: view.ox, oy: view.oy, moved: false };
+  } else {
+    gest = { type: 'place', start: p, ox: view.ox, oy: view.oy, moved: false };
+    ghost = placingGhost(f); requestRender();
+  }
+});
+cv.addEventListener('pointermove', (e) => {
+  const p = evPos(e);
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, p);
+  if (gest && gest.type === 'pinch' && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const s2 = clamp(gest.s * d / gest.d, 4, 80), k = s2 / gest.s;
+    view = { s: s2, ox: mid.x - (gest.mid.x - gest.ox) * k, oy: mid.y - (gest.mid.y - gest.oy) * k };
+    requestRender(); return;
+  }
+  if (!gest) {
+    if (e.pointerType === 'mouse') {
+      const f = toTileF(p); ghost = placingGhost(f);
+      const hit = tool === 'select' || tool === 'erase' ? hitTest(Math.floor(f.x), Math.floor(f.y)) : null;
+      cv.style.cursor = tool === 'select' ? (hit && !readOnly ? 'grab' : 'default') : tool === 'erase' ? (hit ? 'pointer' : 'default') : 'crosshair';
+      requestRender();
+    }
+    return;
+  }
+  const moved = Math.hypot(p.x - gest.start.x, p.y - gest.start.y) > 6;
+  if (moved) gest.moved = true;
+  if (gest.type === 'drag') {
+    if (!gest.moved) return;
+    const ob = byId(gest.id); if (!ob) return;
+    const f = toTileF(p); const x = Math.round(f.x - gest.dx), y = Math.round(f.y - gest.dy);
+    preview = { id: ob.id, x, y, valid: validAt(ob.type, x, y, ob.id) };
+    cv.style.cursor = 'grabbing'; requestRender();
+  } else if (gest.moved && (gest.type === 'pan' || gest.type === 'place' || gest.type === 'erase')) {
+    view.ox = gest.ox + (p.x - gest.start.x); view.oy = gest.oy + (p.y - gest.start.y);
+    if (gest.type === 'place') ghost = null;
+    requestRender();
+  } else if (gest.type === 'place') { ghost = placingGhost(toTileF(p)); requestRender(); }
+});
+function endPointer(e, cancelled) {
+  const p = ptrs.get(e.pointerId) || evPos(e);
+  ptrs.delete(e.pointerId);
+  if (!gest) return;
+  if (gest.type === 'pinch') { if (ptrs.size === 0) gest = null; return; }
+  const g = gest; gest = null;
+  if (cancelled) { preview = null; requestRender(); return; }
+  if (g.type === 'drag') {
+    if (preview && g.moved) {
+      const pv = preview; preview = null;
+      if (pv.valid) { const ob = byId(pv.id); if (ob && (ob.x !== pv.x || ob.y !== pv.y)) mutate(() => { ob.x = pv.x; ob.y = pv.y; }); }
+      else toast("Can't drop there. The spot is taken or off the map.");
+    }
+    preview = null; requestRender();
+  } else if (g.type === 'pan') {
+    if (!g.moved && !g.hit) { sel = null; refreshUI(); requestRender(); }
+  } else if (g.type === 'place') {
+    if (!g.moved) placeAt(toTileF(p));
+    ghost = e.pointerType === 'mouse' ? placingGhost(toTileF(p)) : null; requestRender();
+  } else if (g.type === 'erase') {
+    if (!g.moved) { const f = toTileF(p); const hit = hitTest(Math.floor(f.x), Math.floor(f.y)); if (hit) removeObj(hit.id); }
+  }
+  cv.style.cursor = '';
+}
+cv.addEventListener('pointerup', (e) => endPointer(e, false));
+cv.addEventListener('pointercancel', (e) => endPointer(e, true));
+cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !gest) { ghost = null; requestRender(); } });
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const p = evPos(e); const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018));
+  zoomAt(f, p.x, p.y);
+}, { passive: false });
+$('#zoomIn').onclick = () => zoomAt(1.25, W / 2, H / 2);
+$('#zoomOut').onclick = () => zoomAt(0.8, W / 2, H / 2);
+$('#zoomFit').onclick = fitView;
+
+function selectObj(id) { sel = id; if (tab !== 'sel' && window.innerWidth > 900) setTab('sel'); refreshUI(); requestRender(); }
+function removeObj(id) { const ob = byId(id); if (!ob) return; mutate((P) => { P.objects = P.objects.filter((o) => o.id !== id); }); if (sel === id) sel = null; refreshUI(); }
+function centerOn(o) { const c = centerOf(o); view.ox = W / 2 - c.x * view.s; view.oy = H / 2 - c.y * view.s; if (view.s < 18) { view.s = 18; view.ox = W / 2 - c.x * 18; view.oy = H / 2 - c.y * 18; } requestRender(); }
+
+/* ---------- tools + keys ---------- */
+function setTool(t) {
+  if (readOnly && t !== 'select') return;
+  tool = t; ghost = null;
+  document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  $('#hint').innerHTML = readOnly ? '<b>View only.</b> Drag to pan · scroll or pinch to zoom' : HINTS[t];
+  requestRender();
+}
+document.querySelectorAll('.tool').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+document.addEventListener('keydown', (e) => {
+  const tg = e.target; if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.tagName === 'SELECT')) return;
+  if (!$('#addModal').hidden) { if (e.key === 'Escape') closeAdd(); return; }
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const map = { v: 'select', c: 'city', 1: 'trap1', 2: 'trap2', h: 'hq', b: 'banner', x: 'block', e: 'erase' };
+  if (map[k]) { setTool(map[k]); return; }
+  if (k === 'f') { fitView(); return; }
+  if (k === 'escape') { setTool('select'); sel = null; refreshUI(); requestRender(); return; }
+  if ((k === 'delete' || k === 'backspace') && sel) { e.preventDefault(); removeObj(sel); return; }
+  const arrows = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] };
+  if (arrows[k] && sel && !readOnly) {
+    e.preventDefault(); const ob = byId(sel); if (!ob) return;
+    const [dx, dy] = arrows[k];
+    if (validAt(ob.type, ob.x + dx, ob.y + dy, ob.id)) mutate(() => { ob.x += dx; ob.y += dy; });
+  }
+});
+$('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo;
+
+/* ---------- panels ---------- */
+function setTab(t) {
+  tab = t;
+  for (const n of ['sel', 'mem', 'map']) { $('#tab-' + n).setAttribute('aria-selected', String(n === t)); $('#pane-' + n).hidden = n !== t; }
+  refreshUI();
+}
+document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+function coordStr(o) { return `${plan.grid.ox + o.x}:${plan.grid.oy + o.y}`; }
+function trapLabel(n) { const t = trapObj(n); return t ? (t.label || NAMES['trap' + n]) : NAMES['trap' + n]; }
+
+function refreshUI() {
+  $('#planTitle').textContent = plan.name || 'Bear Trap Planner';
+  const cities = plan.objects.filter((o) => o.type === 'city');
+  $('#planSub').textContent = `${cities.length} ${cities.length === 1 ? 'city' : 'cities'} · ${plan.grid.w}×${plan.grid.h} tiles`;
+  $('#btnUndo').disabled = readOnly || !undoStack.length;
+  $('#btnRedo').disabled = readOnly || !redoStack.length;
+  $('#onboard').hidden = readOnly || onboardDismissed || cities.length > 0;
+  document.querySelectorAll('.tool').forEach((b) => { if (b.dataset.tool !== 'select') b.disabled = readOnly; });
+  renderSel(); renderMembers(); renderSettings();
+}
+
+function renderSel() {
+  const pane = $('#pane-sel'); const ob = sel ? byId(sel) : null;
+  const focusId = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;
+  if (!ob) {
+    pane.innerHTML = `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3l14 8-6 1.6L10 19z"/></svg><div>Tap a city, trap or building on the map to edit it.</div></div>`;
+    return;
+  }
+  const dis = readOnly ? 'disabled' : '';
+  let h = `<h3>${ob.type === 'city' ? `<span class="dot t${ob.trap}"></span>` : ''}${esc(ob.type === 'city' ? (ob.name || 'City') : (ob.label || NAMES[ob.type]))}</h3>`;
+  const pos = `<b>${coordStr(ob)}</b> <span class="muted">(top-left tile, ${sz(ob)}×${sz(ob)})</span>`;
+  if (ob.type === 'city') {
+    const t = cityTrap(ob);
+    const d = t ? dist(ob, t).toFixed(1) : null;
+    let terr = '';
+    if (plan.settings.territory) { const cov = coverage(plan); terr = insideCov(plan, cov, ob.x, ob.y, 2) ? '<br><span class="muted">Inside alliance territory</span>' : '<br><span class="warn">Outside alliance territory</span>'; }
+    h += `<div class="readout">${pos}${t ? `<br>${d} tiles from ${esc(t.label || NAMES[t.type])}` : ''}${terr}</div>`;
+    h += `<div class="field"><label class="label" for="fName">Player name</label><input class="inp" id="fName" maxlength="40" value="${esc(ob.name)}" ${dis}></div>`;
+    h += `<div class="field"><label class="label" for="fPower">Power</label><input class="inp" id="fPower" placeholder="e.g. 37M" value="${esc(fmtPower(ob.power))}" ${dis}></div>`;
+    h += `<div class="field"><span class="label">Bear trap group</span><div class="seg" id="fTrap">
+      <button data-v="1" aria-pressed="${ob.trap === 1}" ${dis}>Trap 1</button><button data-v="2" aria-pressed="${ob.trap === 2}" ${dis}>Trap 2</button><button data-v="0" aria-pressed="${ob.trap === 0}" ${dis}>None</button></div></div>`;
+    h += `<label class="check"><input type="checkbox" id="fLeader" ${ob.leader ? 'checked' : ''} ${dis}> Rally leader <span class="star">★</span></label>`;
+    h += `<div class="field"><label class="label" for="fNote">Note</label><input class="inp" id="fNote" maxlength="80" placeholder="e.g. moves after Bear 2" value="${esc(ob.note)}" ${dis}></div>`;
+  } else if (ob.type === 'trap1' || ob.type === 'trap2') {
+    const n = ob.type === 'trap1' ? 1 : 2;
+    const list = plan.objects.filter((o) => o.type === 'city' && o.trap === n);
+    h += `<div class="readout">${pos}<br>${list.length} cities in this group</div>`;
+    h += `<div class="field"><label class="label" for="fLabel">Label</label><input class="inp" id="fLabel" maxlength="30" value="${esc(ob.label || '')}" ${dis}></div>`;
+  } else {
+    h += `<div class="readout">${pos}</div>`;
+  }
+  if (!readOnly) h += `<button class="btn danger block" id="fDelete">Remove ${esc(NAMES[ob.type].toLowerCase())}</button>`;
+  pane.innerHTML = h;
+  const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+  on('fName', 'change', (e) => mutate(() => { ob.name = e.target.value.trim().slice(0, 40); }));
+  on('fPower', 'change', (e) => { const v = e.target.value.trim(); const pw = v ? parsePower(v) : 0; if (pw === null) { toast('Write power like 37M, 850K or 37000000.'); e.target.value = fmtPower(ob.power); return; } mutate(() => { ob.power = pw; }); });
+  on('fLeader', 'change', (e) => mutate(() => { ob.leader = e.target.checked; }));
+  on('fNote', 'change', (e) => mutate(() => { ob.note = e.target.value.trim().slice(0, 80); }));
+  on('fLabel', 'change', (e) => mutate(() => { ob.label = e.target.value.trim().slice(0, 30) || NAMES[ob.type]; }));
+  on('fDelete', 'click', () => removeObj(ob.id));
+  const seg = document.getElementById('fTrap');
+  if (seg) seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => mutate(() => { ob.trap = +b.dataset.v; })));
+  if (focusId) { const el = document.getElementById(focusId); if (el) el.focus(); }
+}
+
+function sortedCities() {
+  const cities = plan.objects.filter((o) => o.type === 'city');
+  return cities.map((c) => { const t = cityTrap(c); return { c, t, d: t ? dist(c, t) : Infinity }; })
+    .sort((a, b) => (a.c.trap || 9) - (b.c.trap || 9) || a.d - b.d);
+}
+function renderMembers() {
+  const pane = $('#pane-mem');
+  const rows = sortedCities();
+  const g1 = rows.filter((r) => r.c.trap === 1), g2 = rows.filter((r) => r.c.trap === 2), g0 = rows.filter((r) => !r.c.trap);
+  const sumP = (g) => g.reduce((a, r) => a + (r.c.power || 0), 0);
+  const avgD = (g) => g.length ? (g.reduce((a, r) => a + (Number.isFinite(r.d) ? r.d : 0), 0) / g.length).toFixed(1) : '–';
+  const hasEx = rows.some((r) => r.c.example);
+  let h = `<div class="summary">
+    <div class="sum t1"><div class="k"><span class="dot t1"></span>${esc(trapLabel(1))}</div><div class="v">${g1.length} cities${sumP(g1) ? ' · ' + fmtPower(sumP(g1)) : ''}<br>avg ${avgD(g1)} tiles away</div></div>
+    <div class="sum t2"><div class="k"><span class="dot t2"></span>${esc(trapLabel(2))}</div><div class="v">${g2.length} cities${sumP(g2) ? ' · ' + fmtPower(sumP(g2)) : ''}<br>avg ${avgD(g2)} tiles away</div></div>
+  </div>`;
+  if (hasEx && !readOnly) h += `<div class="notice"><span>These are example cities, not your members.</span><button class="btn small" id="mRemoveEx">Remove examples</button></div>`;
+  if (rows.length > 8) h += `<div class="field"><input class="inp" id="mSearch" type="search" placeholder="Find a player…" value="${esc(memberQuery)}" aria-label="Find a player"></div>`;
+  h += `<div class="rowbtns">${readOnly ? '' : '<button class="btn small primary" id="mAdd">Add members</button><button class="btn small" id="mRepack" title="Move every city as close to its trap as possible, strongest first">Re-pack</button>'}<button class="btn small" id="mCopy">Copy list</button></div>`;
+  if (!rows.length) {
+    h += `<div class="empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/></svg><div>No cities yet. Use <b>Add members</b> to paste your alliance list, or pick the City tool and click the map.</div></div>`;
+  } else {
+    const cov = plan.settings.territory ? coverage(plan) : null;
+    const q = memberQuery.trim().toLowerCase();
+    const group = (title, g) => {
+      if (q) g = g.filter((r) => (r.c.name || '').toLowerCase().includes(q));
+      if (!g.length) return '';
+      let s = `<div class="group-h"><span>${esc(title)}</span><span>tiles</span></div><div class="mlist">`;
+      for (const r of g) {
+        const c = r.c; const out = cov && !insideCov(plan, cov, c.x, c.y, 2);
+        s += `<button class="mrow" data-id="${esc(c.id)}" aria-current="${c.id === sel}"><span class="dot t${c.trap}"></span>
+          <span class="n">${c.leader ? '<span class="star">★</span> ' : ''}${esc(c.name || 'City')}${c.example ? '<span class="tag">example</span>' : ''}</span>
+          <span class="p">${fmtPower(c.power)}</span><span class="d">${out ? '<span class="warn" title="Outside territory">!</span> ' : ''}${Number.isFinite(r.d) ? r.d.toFixed(1) : '–'}</span></button>`;
+      }
+      return s + '</div>';
+    };
+    h += group(trapLabel(1), g1) + group(trapLabel(2), g2) + group('No group', g0);
+  }
+  const hadFocus = document.activeElement && document.activeElement.id === 'mSearch';
+  pane.innerHTML = h;
+  const ms = document.getElementById('mSearch');
+  if (ms) { ms.addEventListener('input', (e) => { memberQuery = e.target.value; renderMembers(); }); if (hadFocus) { ms.focus(); ms.setSelectionRange(ms.value.length, ms.value.length); } }
+  pane.querySelectorAll('.mrow').forEach((b) => b.addEventListener('click', () => { const o = byId(b.dataset.id); if (!o) return; sel = o.id; centerOn(o); refreshUI(); }));
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  on('mAdd', openAdd); on('mRepack', repack); on('mCopy', copyList);
+  on('mRemoveEx', () => { mutate((P) => { P.objects = P.objects.filter((o) => !(o.type === 'city' && o.example)); }); sel = null; refreshUI(); });
+}
+
+function renderSettings() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = v; else el.value = v; } el.disabled = readOnly; };
+  const st = plan.settings, g = plan.grid;
+  set('setName', plan.name); set('setW', g.w); set('setH', g.h); set('setOX', g.ox); set('setOY', g.oy);
+  set('setRings', st.rings); set('setStep', st.ringStep); set('setCoords', st.coords); set('setTerr', st.territory);
+  set('setHQT', st.hqT); set('setBanT', st.banT); set('setGap', String(st.gap));
+  $('#ringRow').hidden = !st.rings; $('#terrRow').hidden = !st.territory;
+  ['btnImportJson', 'btnClearCities', 'btnReset'].forEach((id) => { document.getElementById(id).hidden = readOnly; });
+}
+function bindSetting(id, apply) {
+  const el = document.getElementById(id);
+  el.addEventListener('change', () => { const v = el.type === 'checkbox' ? el.checked : el.value; mutate((P) => apply(P, v)); });
+}
+bindSetting('setName', (P, v) => { P.name = String(v).trim().slice(0, 60) || 'Bear trap plan'; });
+bindSetting('setW', (P, v) => { P.grid.w = clamp(int(v, P.grid.w), 12, 150); trimToGrid(P); });
+bindSetting('setH', (P, v) => { P.grid.h = clamp(int(v, P.grid.h), 12, 150); trimToGrid(P); });
+bindSetting('setOX', (P, v) => { P.grid.ox = int(v, 0); });
+bindSetting('setOY', (P, v) => { P.grid.oy = int(v, 0); });
+bindSetting('setRings', (P, v) => { P.settings.rings = v; });
+bindSetting('setStep', (P, v) => { P.settings.ringStep = clamp(int(v, 4), 1, 20); });
+bindSetting('setCoords', (P, v) => { P.settings.coords = v; });
+bindSetting('setTerr', (P, v) => { P.settings.territory = v; });
+bindSetting('setHQT', (P, v) => { P.settings.hqT = clamp(int(v, 15), 3, 61); });
+bindSetting('setBanT', (P, v) => { P.settings.banT = clamp(int(v, 7), 1, 41); });
+bindSetting('setGap', (P, v) => { P.settings.gap = clamp(int(v, 0), 0, 1); });
+function trimToGrid(P) {
+  const before = P.objects.length;
+  P.objects = P.objects.filter((o) => o.x + sz(o) <= P.grid.w && o.y + sz(o) <= P.grid.h);
+  const lost = before - P.objects.length;
+  if (lost) setTimeout(() => toast(`${lost} item${lost > 1 ? 's' : ''} fell off the smaller map. Undo to get them back.`), 0);
+}
+function armConfirm(btn, label, fn) {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = label; fn(); return; }
+    btn.dataset.armed = '1'; btn.textContent = 'Click again to confirm';
+    setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = label; } }, 3500);
+  });
+}
+armConfirm($('#btnClearCities'), 'Remove all cities', () => { mutate((P) => { P.objects = P.objects.filter((o) => o.type !== 'city'); }); sel = null; refreshUI(); toast('All cities removed. Undo to bring them back.'); });
+armConfirm($('#btnReset'), 'Start from empty map', () => { mutate((P) => { const d = defaultPlan(); P.name = d.name; P.grid = d.grid; P.settings = d.settings; P.objects = d.objects; }); sel = null; onboardDismissed = false; refreshUI(); fitView(); });
+
+/* ---------- add members dialog ---------- */
+function openAdd() { if (readOnly) return; $('#addModal').hidden = false; $('#addMsg').textContent = ''; setTimeout(() => $('#addText').focus(), 0); }
+function closeAdd() { $('#addModal').hidden = true; }
+$('#addCancel').onclick = closeAdd;
+$('#addModal').addEventListener('click', (e) => { if (e.target.id === 'addModal') closeAdd(); });
+$('#addGo').onclick = () => {
+  const members = parseMembers($('#addText').value);
+  if (!members.length) { $('#addMsg').textContent = 'Paste at least one name, one per line.'; return; }
+  if (!trapObj(1) && !trapObj(2)) { $('#addMsg').textContent = 'Place at least one bear trap on the map first.'; return; }
+  const res = placeMembers(members, $('#addSplit').value, $('#addStrong').checked, $('#addMode').value === 'replace');
+  closeAdd(); $('#addText').value = ''; setTab('mem');
+  toast(res && res.failed.length ? `${res.placed.length} placed, ${res.failed.length} didn't fit. Make the map bigger.` : `${res ? res.placed.length : 0} cities placed.`);
+};
+$('#onboardAdd').onclick = openAdd;
+$('#onboardClose').onclick = () => { onboardDismissed = true; refreshUI(); };
+$('#onboardExample').onclick = () => {
+  if (!trapObj(1) && !trapObj(2)) { toast('Place a bear trap first.'); return; }
+  placeMembers(exampleMembers(), 'even', true, false); setTab('mem'); toast('Example alliance placed. Remove it from the Members tab when you add your own.');
+};
+
+/* ---------- copy list ---------- */
+function listText() {
+  const rows = sortedCities();
+  const lines = [`${plan.name}`];
+  for (const n of [1, 2, 0]) {
+    const g = rows.filter((r) => (r.c.trap || 0) === n); if (!g.length) continue;
+    lines.push('', n ? trapLabel(n) : 'No group');
+    g.forEach((r, i) => lines.push(`${i + 1}. ${r.c.leader ? '★ ' : ''}${r.c.name || 'City'}: X ${plan.grid.ox + r.c.x}, Y ${plan.grid.oy + r.c.y}${r.c.note ? ' (' + r.c.note + ')' : ''}`));
+  }
+  return lines.join('\n');
+}
+function copyList() {
+  const text = listText();
+  const fallback = () => {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
+    ta.remove(); toast(ok ? 'City list copied. Paste it in alliance chat or mail.' : "Couldn't copy here. Use Export PDF to share the list.");
+  };
+  try { navigator.clipboard.writeText(text).then(() => toast('City list copied. Paste it in alliance chat or mail.'), fallback); } catch (_) { fallback(); }
+}
+
+/* ---------- official plan ---------- */
+function showOfficial() {
+  const st = $('#status'); st.dataset.s = modified ? 'saving' : 'saved';
+  st.querySelector('span').textContent = modified ? 'Your changes, on this device only' : 'Official plan';
+  $('#btnOfficial').hidden = !modified;
+}
+function useOfficial() {
+  plan = normalize(JSON.parse(JSON.stringify(official))); modified = false; sel = null;
+  undoStack.length = 0; redoStack.length = 0; saveLocal(); showOfficial(); refreshUI(); fitView();
+}
+$('#btnOfficial').onclick = () => { useOfficial(); toast('Showing the official plan again.'); };
+async function loadOfficialFile() {
+  try {
+    const r = await fetch('plan.json', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data || !Array.isArray(data.objects)) return;
+    const np = normalize(data); const id = String(np.updatedAt || 0);
+    if (id === officialId) return;
+    official = np; officialId = id;
+    const l = loadLocal();
+    if (!(l && l.base === officialId && l.modified)) useOfficial();
+  } catch (_) { /* opened as a local file: keep the built-in copy */ }
+}
+
+/* ---------- toast + status ---------- */
+let toastT = 0;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3200); }
+function setStatus(s) {
+  const el = $('#status'); el.dataset.s = s;
+  el.querySelector('span').textContent = { local: 'Saved on this device', saving: 'Saving…', saved: 'Shared plan saved', error: "Couldn't save. Your next change retries", readonly: 'View only', synced: 'Shared plan' }[s] || '';
+}
+
+/* ---------- capabilities: shared plan + downloads ---------- */
+let dbRef = null, downloads = null, writeT = 0, writing = false, lastRev = null, gotRemote = false;
+function scheduleSync() {
+  if (!dbRef || readOnly) return;
+  setStatus('saving'); clearTimeout(writeT); writeT = setTimeout(flush, 700);
+}
+async function flush() {
+  writeT = 0;
+  if (writing) { writeT = setTimeout(flush, 400); return; }
+  writing = true;
+  const rev = uid(); plan.rev = rev; lastRev = rev; saveLocal();
+  try { await dbRef.set({ plan: JSON.parse(JSON.stringify(plan)) }); setStatus(writeT ? 'saving' : 'saved'); }
+  catch (e) {
+    if (e && e.code === 'invalid_argument') { readOnly = true; setStatus('readonly'); setTool('select'); refreshUI(); }
+    else if (e && (e.code === 'revoked' || e.code === 'not_granted')) { dbRef = null; setStatus('local'); }
+    else setStatus('error');
+  } finally { writing = false; }
+}
+function onRemote(snap) {
+  if (!snap.exists) { if (!gotRemote) { gotRemote = true; setStatus(readOnly ? 'readonly' : 'synced'); } return; }
+  const d = snap.data(); const p = d && d.plan;
+  if (!p || typeof p !== 'object') return;
+  if (p.rev && p.rev === lastRev) return;
+  if (writeT || writing) return;
+  const first = !gotRemote; gotRemote = true;
+  plan = normalize(JSON.parse(JSON.stringify(p))); lastRev = plan.rev || null;
+  fixSel(); saveLocal(); preview = null; refreshUI();
+  if (first) fitView(); else requestRender();
+  setStatus(readOnly ? 'readonly' : 'synced');
+}
+async function initCaps() {
+  if (typeof window.claude === 'undefined' || !window.claude || typeof window.claude.use !== 'function') return;
+  const safe = (n) => window.claude.use(n).catch(() => null);
+  safe('downloads').then((d) => { downloads = d; $('#btnExportJson').hidden = !d; });
+  const [db, user] = await Promise.all([safe('db'), safe('user')]);
+  if (!db) return;
+  if (user) { try { const c = await user.can('data.write'); if (c === false) readOnly = true; } catch (_) {} }
+  try {
+    dbRef = db.doc('plans/main');
+    setStatus(readOnly ? 'readonly' : 'synced');
+    dbRef.onSnapshot(onRemote, () => { dbRef = null; setStatus(readOnly ? 'readonly' : 'local'); });
+  } catch (_) { dbRef = null; }
+  if (readOnly) setTool('select');
+  refreshUI();
+}
+
+/* ---------- export: PDF + plan file ---------- */
+async function saveFile(filename, data) {
+  if (!downloads) {
+    try {
+      const blob = data instanceof Blob ? data : new Blob([data], { type: filename.endsWith('.json') ? 'application/json' : 'application/octet-stream' });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000); return true;
+    } catch (_) { toast("Couldn't save the file."); return false; }
+  }
+  try { await downloads.save({ filename, data }); return true; }
+  catch (e) {
+    const c = e && e.code;
+    if (c === 'declined') return false;
+    if (c === 'rate_limited') toast('A save prompt is already open.');
+    else toast("Couldn't save the file here.");
+    return false;
+  }
+}
+const slug = (s) => (s || 'plan').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'plan';
+$('#btnExportJson').onclick = () => saveFile('plan.json', JSON.stringify(Object.assign({ app: 'bear-trap-planner' }, plan), null, 2));
+$('#btnImportJson').onclick = () => $('#fileImport').click();
+$('#fileImport').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try { const data = JSON.parse(String(r.result)); if (!data || !Array.isArray(data.objects)) throw new Error('bad'); const np = normalize(data); mutate((P) => { Object.keys(P).forEach((k) => delete P[k]); Object.assign(P, np); }); sel = null; refreshUI(); fitView(); toast('Plan loaded.'); }
+    catch (_) { toast("That file isn't a Bear Trap Planner plan."); }
+  };
+  r.readAsText(f); e.target.value = '';
+});
+
+const PW = 2970, PH = 2100; // A4 landscape at 10 px per mm
+function pageCanvas() { const c = document.createElement('canvas'); c.width = PW; c.height = PH; const g = c.getContext('2d'); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, PW, PH); return [c, g]; }
+function pageHeader(g, title, sub) {
+  g.fillStyle = '#1B2338'; g.fillRect(0, 0, PW, 190);
+  g.fillStyle = '#E8B04B'; g.font = `700 74px ${FONT_HEAD}`; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+  g.fillText(fitText(g, title, PW - 900), 90, 108);
+  g.fillStyle = '#C9CEDD'; g.font = `500 34px ${FONT_UI}`; g.fillText(sub, 90, 158);
+  g.textAlign = 'right'; g.fillStyle = '#8E97AE'; g.font = `600 30px ${FONT_UI}`; g.fillText('Bear Trap Planner · Kingshot', PW - 90, 108);
+}
+function renderMapPage() {
+  const [c, g] = pageCanvas();
+  const rows = sortedCities();
+  const n1 = rows.filter((r) => r.c.trap === 1).length, n2 = rows.filter((r) => r.c.trap === 2).length;
+  const date = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  pageHeader(g, plan.name, `${date} · ${rows.length} cities · ${trapLabel(1)}: ${n1} · ${trapLabel(2)}: ${n2}`);
+  const ax = 150, ay = 270, aw = PW - 240, ah = PH - 270 - 190;
+  const b = contentBox(plan, 2);
+  const s = Math.min(aw / b.w, ah / b.h);
+  const ox = ax + (aw - b.w * s) / 2 - b.x * s, oy = ay + (ah - b.h * s) / 2 - b.y * s;
+  const rx = ox + b.x * s, ry = oy + b.y * s, rw = b.w * s, rh = b.h * s;
+  g.save(); g.beginPath(); g.rect(rx, ry, rw, rh); g.clip();
+  drawScene(g, { W: PW, H: PH, s, ox, oy, pal: PRINT, plan, exportMode: true });
+  g.restore();
+  g.strokeStyle = '#1B2338'; g.lineWidth = 3; g.strokeRect(rx, ry, rw, rh);
+  if (plan.settings.coords) {
+    g.fillStyle = '#5A6377'; g.font = `600 ${clamp(s * 0.42, 18, 30)}px ${FONT_UI}`;
+    g.textAlign = 'center'; g.textBaseline = 'bottom';
+    for (let x = Math.ceil(b.x / 5) * 5; x <= b.x + b.w; x += 5) g.fillText(String(plan.grid.ox + x), ox + x * s, ry - 10);
+    g.textAlign = 'right'; g.textBaseline = 'middle';
+    for (let y = Math.ceil(b.y / 5) * 5; y <= b.y + b.h; y += 5) g.fillText(String(plan.grid.oy + y), rx - 12, oy + y * s);
+  }
+  // legend
+  const ly = PH - 110; let lx = 150;
+  g.textAlign = 'left'; g.textBaseline = 'middle'; g.font = `500 32px ${FONT_UI}`;
+  const item = (draw, label) => { draw(lx, ly); g.fillStyle = '#172033'; g.fillText(label, lx + 58, ly + 2); lx += 58 + g.measureText(label).width + 60; };
+  const sq = (fill, stroke) => (x, y) => { rr(g, x, y - 20, 40, 40, 8); g.fillStyle = fill; g.fill(); if (stroke) { g.strokeStyle = stroke; g.lineWidth = 4; g.stroke(); } };
+  item(sq(PRINT.t1, null), trapLabel(1)); item(sq(PRINT.t2, null), trapLabel(2));
+  item(sq(PRINT.t1Soft, PRINT.t1), 'City, Trap 1 group'); item(sq(PRINT.t2Soft, PRINT.t2), 'City, Trap 2 group');
+  item((x, y) => { g.fillStyle = PRINT.focus; star(g, x + 20, y, 22); }, 'Rally leader');
+  item(sq(PRINT.hq, PRINT.hqInk), 'Alliance HQ');
+  if (plan.settings.rings) item((x, y) => { g.strokeStyle = PRINT.muted; g.lineWidth = 4; g.setLineDash([10, 7]); g.beginPath(); g.arc(x + 20, y, 18, 0, Math.PI * 2); g.stroke(); g.setLineDash([]); }, `Ring every ${plan.settings.ringStep} tiles`);
+  g.fillStyle = '#8E97AE'; g.font = `500 26px ${FONT_UI}`; g.textAlign = 'right';
+  g.fillText('Coordinates are the top-left tile of each building.', PW - 90, PH - 50);
+  return c;
+}
+function renderTablePages() {
+  const rows = sortedCities(); if (!rows.length) return [];
+  const per = 22, pages = [];
+  const cols = [{ x: 90, t: '#' }, { x: 180, t: 'Player' }, { x: 1180, t: 'Group' }, { x: 1560, t: 'Role' }, { x: 1890, t: 'Power', r: true, rx: 2120 }, { x: 2200, t: 'X : Y' }, { x: 2560, t: 'Tiles to trap', r: true, rx: 2880 }];
+  const total = Math.ceil(rows.length / per);
+  for (let p = 0; p < total; p++) {
+    const [c, g] = pageCanvas();
+    pageHeader(g, plan.name, `City list · page ${p + 1} of ${total} · sorted by group and distance`);
+    let y = 290;
+    g.font = `700 28px ${FONT_UI}`; g.fillStyle = '#5A6377'; g.textBaseline = 'middle';
+    for (const col of cols) { g.textAlign = col.r ? 'right' : 'left'; g.fillText(col.t.toUpperCase(), col.r ? col.rx : col.x, y); }
+    g.strokeStyle = '#D5DBE5'; g.lineWidth = 3; g.beginPath(); g.moveTo(90, y + 30); g.lineTo(PW - 90, y + 30); g.stroke();
+    y += 50;
+    const slice = rows.slice(p * per, p * per + per);
+    slice.forEach((r, i) => {
+      const rh = 70, cy = y + rh / 2, idx = p * per + i + 1, cc = r.c;
+      if (i % 2 === 0) { g.fillStyle = '#F4F6F9'; g.fillRect(90, y, PW - 180, rh); }
+      g.textBaseline = 'middle'; g.textAlign = 'left';
+      g.fillStyle = '#5A6377'; g.font = `500 32px ${FONT_UI}`; g.fillText(String(idx), 100, cy);
+      let nx = 180;
+      if (cc.leader) { g.fillStyle = PRINT.focus; star(g, nx + 16, cy, 17); nx += 44; }
+      g.fillStyle = '#172033'; g.font = `600 36px ${FONT_UI}`; g.fillText(fitText(g, cc.name || 'City', 1180 - nx - 30), nx, cy);
+      const [main, soft, ink] = trapColors(cc.trap, PRINT);
+      const gl = cc.trap ? trapLabel(cc.trap) : 'No group';
+      g.font = `700 28px ${FONT_HEAD}`; const gw = g.measureText(gl).width + 36;
+      rr(g, 1180, cy - 22, gw, 44, 22); g.fillStyle = soft; g.fill(); g.strokeStyle = main; g.lineWidth = 2.5; g.stroke();
+      g.fillStyle = ink; g.fillText(gl, 1198, cy + 1);
+      g.font = `500 32px ${FONT_UI}`; g.fillStyle = '#172033';
+      g.fillText(cc.leader ? 'Rally leader' : 'Member', 1560, cy);
+      g.textAlign = 'right'; g.fillText(fmtPower(cc.power) || '–', 2120, cy);
+      g.textAlign = 'left'; g.font = `600 34px ${FONT_UI}`; g.fillText(`${plan.grid.ox + cc.x} : ${plan.grid.oy + cc.y}`, 2200, cy);
+      g.textAlign = 'right'; g.font = `500 32px ${FONT_UI}`; g.fillText(Number.isFinite(r.d) ? r.d.toFixed(1) : '–', 2880, cy);
+      if (cc.note) { g.textAlign = 'left'; g.fillStyle = '#5A6377'; g.font = `italic 400 24px ${FONT_UI}`; }
+      y += rh;
+    });
+    g.textAlign = 'right'; g.fillStyle = '#8E97AE'; g.font = `500 26px ${FONT_UI}`;
+    g.fillText('★ = rally leader · coordinates are the top-left tile of each city', PW - 90, PH - 50);
+    pages.push(c);
+  }
+  return pages;
+}
+$('#btnPdf').onclick = async () => {
+  if (!window.jspdf || !window.jspdf.jsPDF) { toast("The PDF tool didn't load. Check your connection and reload."); return; }
+  const btn = $('#btnPdf'); btn.disabled = true; btn.textContent = 'Building PDF…';
+  try {
+    try { await Promise.all([document.fonts.load(`700 40px "Barlow Condensed"`), document.fonts.load(`600 40px "Barlow Condensed"`), document.fonts.load(`500 30px "Barlow"`), document.fonts.load(`600 30px "Barlow"`)]); } catch (_) {}
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+    const pages = [renderMapPage(), ...renderTablePages()];
+    pages.forEach((c, i) => { if (i) doc.addPage('a4', 'landscape'); doc.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 297, 210, undefined, 'FAST'); });
+    doc.setProperties({ title: plan.name, subject: 'Kingshot bear trap layout', creator: 'Bear Trap Planner' });
+    const ok = await saveFile(slug(plan.name) + '.pdf', doc.output('blob'));
+    if (ok) toast('PDF saved.');
+  } catch (e) { toast("Couldn't build the PDF. Try again."); }
+  finally { btn.disabled = false; btn.textContent = 'Export PDF'; }
+};
+
+/* ---------- boot ---------- */
+function onTheme() { readPal(); requestRender(); }
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onTheme); } catch (_) {}
+new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+new ResizeObserver(resize).observe(stage);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestRender());
+window.__btp = { get plan() { return plan; }, placeMembers, exampleMembers, renderMapPage, renderTablePages };
+setTool('select'); setTab('mem'); readPal(); refreshUI(); resize(); showOfficial();
+loadOfficialFile();
+})();
+</script>
+
+</body>
+</html>
